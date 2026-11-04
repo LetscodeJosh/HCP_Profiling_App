@@ -1,6 +1,6 @@
 # Release Notes - v.0.8.0 (Build 51)
 
-**Release Date:** October 30, 2026
+**Release Date:** November 4, 2026
 
 ## Highlights
 - **DPA of 2012 Compliant Consent Naming (`<Company *> <Branch>`)**:

@@ -5,7 +5,7 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ---
 
-## [v.0.8.0] - 2026-10-30
+## [v.0.8.0] - 2026-11-04
 
 ### 📋 DPA of 2012 Compliant Consent Naming via Employee `Company *` & `Branch` Lookup
 - **Employee `Company *` + `Branch` Consent Entity Formatting (`LocationResolver.resolveConsentCompanyDetails`)**:
