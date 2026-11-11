@@ -15,7 +15,7 @@ class AppConfig {
   // 🚀 SERVER ENVIRONMENT SWITCH (SINGLE-LINE TOGGLE)
   // Set to Environment.development, Environment.staging, or Environment.production
   // ===========================================================================
-  static Environment environment = Environment.development;
+  static Environment environment = Environment.staging;
 
   // Development Server URL
   static const String devServerUrl = 'https://dev.pmii-marketing.com';
