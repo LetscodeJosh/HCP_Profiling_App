@@ -52,7 +52,8 @@ ASSETS_HTML = os.path.join(BASE_DIR, 'assets', 'web', 'territory_reconfiguration
 # Change to 'production' or 'development'
 # ===========================================================================
 # Environment-driven ERPNext URL (strictly isolated from version control)
-ERPNEXT_SERVER_URL = os.environ.get('ERPNEXT_URL', 'https://dev.pmii-marketing.com').rstrip('/')
+_raw_env_url = os.environ.get('ERPNEXT_URL', 'https://dev.pmii-marketing.com').rstrip('/')
+ERPNEXT_SERVER_URL = _raw_env_url
 
 ACTIVE_COOKIE_JAR = http.cookiejar.CookieJar()
 ACTIVE_SSL_CTX = ssl.create_default_context()

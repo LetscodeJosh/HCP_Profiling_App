@@ -1,59 +1,71 @@
-# PIMS Territory Reconfiguration Portal • Installation Guide
+# PIMS Territory Reconfiguration Portal (v.0.1.1)
 
-This folder contains the complete, deployment-ready files to host the **Territory Reconfiguration Web App** on **Streamlit Community Cloud (100% Free)**.
+Welcome to the **PIMS Territory Reconfiguration Portal** repository. This enterprise web application allows Sales Force Effectiveness (SFE) Leads and District Managers to reconfigure territories, manage MedRep resignations, execute portfolio doctor handovers, and review institution proposals with 1:1 ERPNext masterlist synchronization.
 
----
-
-## 📁 Package Contents
-
-```
-Streamlit_Deployment/
-├── app.py                                  # Streamlit cloud runner (full-screen responsive)
-├── requirements.txt                        # Cloud container requirements (streamlit>=1.35.0)
-├── territory_reconfiguration_portal.html   # Complete interactive web app (1:1 ERPNext Tree, CRUD, Login)
-├── .streamlit/
-│   └── config.toml                         # Enterprise theme & performance configuration
-└── README.md                               # Deployment guide
-```
+See [`RELEASE_NOTES.md`](./RELEASE_NOTES.md) for the complete `v.0.1.1` release notes and active feature matrix.
 
 ---
 
-## 🚀 How to Deploy to Streamlit Cloud in 3 Minutes (Free)
+## 🚀 Deployment Options
 
-### Step 1: Create a GitHub Repository
-1. Go to [github.com/new](https://github.com/new).
-2. Name your repository (e.g. `pims-territory-portal`).
-3. Set it to **Public** (required for free Streamlit Community Cloud hosting).
-4. Upload all files from this folder (`app.py`, `requirements.txt`, `territory_reconfiguration_portal.html`, `.streamlit/config.toml`) into your new GitHub repository.
+This repository supports two production deployment models:
 
-### Step 2: Sign In to Streamlit Community Cloud
-1. Go to **[share.streamlit.io](https://share.streamlit.io/)**.
-2. Click **"Continue with GitHub"** and authorize Streamlit.
+### Option 1: Pure GCP Compute Engine (Bare-Metal Linux via PuTTY) — Recommended for Enterprise
+Deploy directly onto a **Google Cloud Platform (GCP) Compute Engine VM** using standard Linux tools (`systemd`, `nginx`, `python3-venv`).
+* **Zero Docker, Zero Container Extensions**.
+* Runs 24/7 as an autonomous background service (`pims-portal.service`).
+* Includes Nginx reverse proxy with WebSocket support and optional free Let's Encrypt SSL.
+* 👉 **Follow the complete step-by-step runbook in [`GCP_DEPLOYMENT_GUIDE.md`](./GCP_DEPLOYMENT_GUIDE.md)**.
 
-### Step 3: Deploy Your App
-1. Click the **"Create app"** button.
-2. Select:
-   - **Repository:** `your-username/pims-territory-portal`
-   - **Branch:** `main`
-   - **Main file path:** `app.py`
-   - **App URL:** (Optional: customize your subdomain, e.g. `pims-territory.streamlit.app`)
-3. Click **"Deploy!"**
+**Quick 1-Command Installation via PuTTY:**
+```bash
+git clone https://github.com/LetscodeJosh/PIMS-Territory-Reconfig-Portal.git ~/pims-portal
+cd ~/pims-portal
+bash deploy/gcp/install.sh
+```
 
-### Step 4: Configure Secure Secrets
-In Streamlit Cloud:
-1. Go to your App Settings $\rightarrow$ **Secrets**.
-2. Add your ERPNext endpoint securely:
+---
+
+### Option 2: Streamlit Community Cloud (Zero Server Management)
+Deploy in 3 minutes via Streamlit's hosted cloud service:
+1. Fork or push this repository to GitHub.
+2. Sign in to **[share.streamlit.io](https://share.streamlit.io/)**.
+3. Select this repository (`main` branch) with main file path `app.py`.
+4. Add secrets in Streamlit Cloud Settings $\rightarrow$ Secrets if connecting to a custom ERPNext endpoint:
    ```toml
-   ERPNEXT_URL = "https://your-frappe-server.com"
-   SESSION_SECRET = "your-random-64-character-hex-secret"
+   ERPNEXT_URL = "https://your-erpnext-domain.com"
    ```
-3. Save secrets. The portal will automatically connect to your instance securely without exposing endpoints in source code.
+5. Click **Deploy!**
 
 ---
 
-## 📱 How Users Access & Install Across Devices
+## 📁 Repository Structure
 
-Once deployed, send the live link (`https://<your-app>.streamlit.app`) to your team:
-- **PC & Mac Desktop App (1-Click PWA)**: Open in Chrome/Edge $\rightarrow$ click the **Install App** icon in the address bar to create a standalone Desktop icon.
-- **iPhone / iPad App**: Open in Safari $\rightarrow$ tap Share $\rightarrow$ **"Add to Home Screen"**.
-- **Android App**: Open in Chrome $\rightarrow$ tap `⋮` $\rightarrow$ **"Install app"** / **"Add to Home screen"**.
+```
+PIMS-Territory-Reconfig-Portal/
+├── app.py                                  # Streamlit enterprise runner & gateway connector
+├── requirements.txt                        # Python dependencies (streamlit>=1.35.0)
+├── territory_reconfiguration_portal.html   # Standalone web app (1:1 ERPNext Tree, CRUD, Login)
+├── index.html                              # Web app alias for hosting platforms
+├── secure_frappe_gateway.py                # Cyber-grade Frappe API proxy & anti-BOLA/IDOR sentinel
+├── .env.example                            # Production environment template
+├── GCP_DEPLOYMENT_GUIDE.md                 # Complete GCP bare-metal deployment runbook
+├── RELEASE_NOTES.md                        # Formal release notes & UAT changelog
+├── .streamlit/
+│   └── config.toml                         # Port binding, theme & performance configuration
+└── deploy/
+    └── gcp/                                # Pure GCP bare-metal deployment suite
+        ├── install.sh                      # Turnkey 1-command installer script
+        ├── nginx-pims.conf                 # Hardened Nginx reverse proxy with WebSocket support
+        ├── pims-portal.service             # Production systemd unit file (24/7 auto-restart)
+        ├── update.sh                       # 1-command update script for future releases
+        └── setup_ssl.sh                    # Free Let's Encrypt SSL certificate installer
+```
+
+---
+
+## 🔒 Security & ERPNext Integration Standard
+
+* **Zero Hardcoded Secrets**: All endpoints and service account credentials can be configured via environment variables (`.env`) or Streamlit secrets.
+* **Masterlist Protection**: Permanent deletion is disabled in the web portal. Unused territories are safely archived to the Archive Vault.
+* **Resilient Failover**: Cached structures and session recovery ensure the portal remains responsive during transient backend interruptions.

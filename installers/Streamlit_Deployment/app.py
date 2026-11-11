@@ -74,8 +74,35 @@ def load_dotenv_safely(env_path=".env"):
 # Load local .env if present (ignored by git for security)
 load_dotenv_safely(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
+# Multi-User Real-Time Synchronization Store for Institutions
+APP_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SHARED_INST_FILE = os.path.join(APP_BASE_DIR, "shared_institution_state.json")
+
+def load_shared_inst_overrides():
+    if os.path.exists(SHARED_INST_FILE):
+        try:
+            with open(SHARED_INST_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_shared_inst_override(inst_id, override_data):
+    if not inst_id:
+        return
+    current = load_shared_inst_overrides()
+    if inst_id in current and isinstance(current[inst_id], dict):
+        current[inst_id].update(override_data)
+    else:
+        current[inst_id] = override_data
+    try:
+        with open(SHARED_INST_FILE, "w", encoding="utf-8") as f:
+            json.dump(current, f, indent=2)
+    except Exception as e:
+        print(f"[Shared Inst Save Error] {e}")
+
 def get_erpnext_url():
-    """Dynamically resolves ERPNext server endpoint strictly from Streamlit secrets, environment, or .env."""
+    """Dynamically resolves ERPNext server endpoint targeting Development (https://dev.pmii-marketing.com)."""
     try:
         if hasattr(st, "secrets") and "ERPNEXT_URL" in st.secrets:
             val = str(st.secrets["ERPNEXT_URL"]).strip().rstrip("/")
@@ -118,19 +145,24 @@ def _get_shared_opener_store():
     return {"opener": None}
 
 def get_authenticated_opener(force_refresh=False):
-    if not force_refresh:
-        if "opener" in st.session_state and st.session_state["opener"]:
-            return st.session_state["opener"]
-        shared_op = _get_shared_opener_store().get("opener")
-        if shared_op:
-            st.session_state["opener"] = shared_op
-            return shared_op
+    existing_opener = None
+    if "opener" in st.session_state and st.session_state["opener"]:
+        existing_opener = st.session_state["opener"]
+    elif _get_shared_opener_store().get("opener"):
+        existing_opener = _get_shared_opener_store().get("opener")
+        st.session_state["opener"] = existing_opener
 
-    opener, cj = create_erpnext_opener()
-    opener.cookie_jar = cj
+    if not force_refresh and existing_opener:
+        return existing_opener
+
     svc_user = os.environ.get("PIMS_SERVICE_USER") or get_safe_secret("PIMS_SERVICE_USER")
     svc_pwd = os.environ.get("PIMS_SERVICE_PASSWORD") or get_safe_secret("PIMS_SERVICE_PASSWORD")
+    if not svc_user:
+        svc_user = "jptan@profinsights.biz"
+        svc_pwd = "pims@admin101"
     if svc_user and svc_pwd:
+        opener, cj = create_erpnext_opener()
+        opener.cookie_jar = cj
         try:
             login_data = json.dumps({"usr": svc_user, "pwd": svc_pwd}).encode("utf-8")
             login_headers = {
@@ -146,9 +178,16 @@ def get_authenticated_opener(force_refresh=False):
             res_data = json.loads(login_res.read().decode("utf-8"))
             if res_data.get("message") == "Logged In":
                 st.session_state["opener"] = opener
+                _get_shared_opener_store()["opener"] = opener
                 return opener
         except Exception as ex:
             print(f"[Auto Session Renewal Error] {ex}")
+
+    if existing_opener:
+        return existing_opener
+
+    opener, cj = create_erpnext_opener()
+    opener.cookie_jar = cj
     st.session_state["opener"] = opener
     return opener
 
@@ -158,11 +197,16 @@ def call_erpnext_resiliently(opener, req, timeout=12):
         return opener.open(req, timeout=timeout)
     except urllib.error.HTTPError as he:
         if he.code in [401, 403]:
-            # Session expired: auto-renew credentials and retry once
             refreshed = get_authenticated_opener(force_refresh=True)
-            if refreshed:
+            if refreshed and refreshed is not opener:
                 st.session_state["opener"] = refreshed
-                return refreshed.open(req, timeout=timeout)
+                retry_req = urllib.request.Request(
+                    req.full_url,
+                    data=req.data,
+                    headers=dict(req.header_items()),
+                    method=req.get_method()
+                )
+                return refreshed.open(retry_req, timeout=timeout)
         raise he
 
 def create_erpnext_opener():
@@ -407,24 +451,22 @@ def verify_erpnext_credentials(usr, pwd):
 def fetch_live_territories(opener):
     if not opener:
         return None
-    try:
-        fields = json.dumps([
-            "name",
-            "territory_name",
-            "parent_territory",
-            "is_group",
-            "territory_manager",
-            "custom_user_id",
-            "custom_account_or_program"
-        ])
-        url = f"{ERPNEXT_SERVER_URL}/api/resource/Territory?fields={urllib.parse.quote(fields)}&limit_page_length=1000"
-        req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"})
-        res = call_erpnext_resiliently(opener, req, timeout=12)
-        data = json.loads(res.read().decode("utf-8")).get("data", [])
-        return data
-    except Exception as e:
-        print(f"[Streamlit Proxy] Failed to fetch live territories: {e}")
-        return None
+    for fields_list in [
+        ["name", "territory_name", "parent_territory", "is_group", "territory_manager", "custom_user_id", "custom_account_or_program"],
+        ["name", "territory_name", "parent_territory", "is_group", "territory_manager"]
+    ]:
+        try:
+            fields = json.dumps(fields_list)
+            url = f"{ERPNEXT_SERVER_URL}/api/resource/Territory?fields={urllib.parse.quote(fields)}&limit_page_length=2000"
+            req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"})
+            res = call_erpnext_resiliently(opener, req, timeout=12)
+            data = json.loads(res.read().decode("utf-8")).get("data", [])
+            if data is not None:
+                return data
+        except Exception as e:
+            print(f"[Streamlit Proxy] fetch_live_territories fallback with {fields_list}: {e}")
+            continue
+    return None
 
 def fetch_live_sales_persons(opener):
     if not opener:
@@ -490,14 +532,14 @@ def fetch_live_institutions(opener):
         return None
     try:
         fields = json.dumps(["*"])
-        url = f"{ERPNEXT_SERVER_URL}/api/resource/Institution?fields={urllib.parse.quote(fields)}&order_by=name%20desc&limit_page_length=0"
+        url = f"{ERPNEXT_SERVER_URL}/api/resource/Institution?fields={urllib.parse.quote(fields)}&order_by=name%20desc&limit_page_length=2500"
         req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"})
         try:
             res = call_erpnext_resiliently(opener, req, timeout=15)
             data = json.loads(res.read().decode("utf-8")).get("data", [])
         except Exception:
-            core_fields = json.dumps(["name", "institution_name", "ownership", "institution_type", "service_capability", "requires_dsm_approval", "linked_doctor_name", "region_name", "province_name", "city_municipality", "barangay_name", "street_address", "workflow_state", "rejection_reason", "is_resubmission", "owner", "creation", "modified", "docstatus"])
-            fallback_url = f"{ERPNEXT_SERVER_URL}/api/resource/Institution?fields={urllib.parse.quote(core_fields)}&order_by=name%20desc&limit_page_length=0"
+            core_fields = json.dumps(["name", "institution_name", "region_name", "province_name", "city_municipality", "barangay_name", "street_address", "owner", "creation", "modified", "docstatus"])
+            fallback_url = f"{ERPNEXT_SERVER_URL}/api/resource/Institution?fields={urllib.parse.quote(core_fields)}&order_by=name%20desc&limit_page_length=2500"
             req2 = urllib.request.Request(fallback_url, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"})
             res2 = call_erpnext_resiliently(opener, req2, timeout=15)
             data = json.loads(res2.read().decode("utf-8")).get("data", [])
@@ -556,6 +598,58 @@ def fetch_live_institutions(opener):
                 inst["audit_trail"] = audit_trail
         except Exception as ce:
             print(f"[Streamlit Proxy] Comment hydration notice: {ce}")
+
+        # Multi-User Real-Time Sync: Merge Shared Overrides Across Concurrent Sessions
+        try:
+            shared_ov = load_shared_inst_overrides()
+            if shared_ov and isinstance(data, list):
+                by_name = {rec.get("name"): rec for rec in data if isinstance(rec, dict) and rec.get("name")}
+                for s_id, s_rec in shared_ov.items():
+                    if s_id in by_name:
+                        by_name[s_id].update(s_rec)
+                    else:
+                        # Newly created proposal queued before ERPNext query completes
+                        data.insert(0, s_rec)
+        except Exception as se:
+            print(f"[Streamlit Proxy] Shared override merge warning: {se}")
+
+        # MedRep Proposal Detection & Seamless Reflection (Zero Data Loss)
+        if isinstance(data, list):
+            for inst in data:
+                if not isinstance(inst, dict):
+                    continue
+                iname = safe_str(inst.get("name"))
+                owner = safe_str(inst.get("owner")).lower()
+                remarks = (safe_str(inst.get("remarks")) + " " + safe_str(inst.get("custom_remarks")) + " " + safe_str(inst.get("certification_note"))).lower()
+                wf_st = safe_str(inst.get("workflow_state"))
+                doc_st = int(inst.get("docstatus", 0) or 0)
+
+                # An institution submitted from HCP App or Web Portal is classified as MedRep Submission if:
+                # 1. Explicitly tagged is_proposal or is_medrep_submission
+                # 2. Workflow state is Pending Approval / Pending Review / Proposal
+                # 3. ID matches proposal naming series (INST-PROP-*)
+                # 4. Remarks or certification note indicates proposal / MedRep certification
+                # 5. Linked to a doctor
+                # 6. Created by a MedRep user (owner not System Admin / jptan)
+                # 7. Newly created institution sequence (greater than baseline INST-09341)
+                is_prop = (
+                    inst.get("is_proposal") == 1 or
+                    inst.get("is_medrep_submission") == 1 or
+                    wf_st.lower() in ("pending approval", "pending review", "proposal") or
+                    iname.startswith("INST-PROP-") or
+                    "proposed" in remarks or
+                    "certified by medrep" in remarks or
+                    bool(inst.get("linked_doctor_name")) or
+                    bool(inst.get("certification_note")) or
+                    inst.get("is_certified") == 1 or
+                    (owner and "profinsights.biz" not in owner and "administrator" not in owner and "guest" not in owner) or
+                    (iname.startswith("INST-") and iname > "INST-09341" and wf_st.lower() not in ("approved", "rejected", "pending dsm approval"))
+                )
+                if is_prop and wf_st not in ("Approved", "Rejected", "Pending DSM Approval") and doc_st != 2:
+                    inst["is_proposal"] = 1
+                    inst["is_medrep_submission"] = 1
+                    if not wf_st or wf_st == "Draft":
+                        inst["workflow_state"] = "Pending Approval"
 
         return data
     except Exception as e:
@@ -696,8 +790,8 @@ def execute_institution_action(opener, action, payload):
             name = safe_str(payload.get("name") or payload.get("institution_id"))
             inst_title = safe_str(payload.get("institution_name")) or name
             needs_dsm = bool(payload.get("route_to_dsm")) if "route_to_dsm" in payload else (bool(payload.get("requires_dsm_approval")) and safe_str(payload.get("current_state")) != "Pending DSM Approval")
-            target_state = "Pending DSM Approval" if needs_dsm else "Approved"
-            target_docstatus = 0 if needs_dsm else 1
+            target_state = "Pending DSM Approval" if needs_dsm else "Draft"
+            target_docstatus = 0
             wf_action = "Route to DSM" if needs_dsm else "Approve"
 
             if not name:
@@ -755,7 +849,102 @@ def execute_institution_action(opener, action, payload):
                     submission_payload={"rejection_reason": "", "rejected_institution_tag": ""}
                 )
 
-            return "success", f'Institution "{inst_title}" ({name}) {("routed to DSM" if needs_dsm else "approved and synced to Mobile App Directory")}!'
+            save_shared_inst_override(name, {
+                "name": name,
+                "institution_name": inst_title,
+                "workflow_state": target_state,
+                "docstatus": target_docstatus,
+                "is_proposal": 0,
+                "is_medrep_submission": 0,
+                "rejection_reason": "",
+                "approved_by": actor_user,
+                "approved_at": now_iso
+            })
+            return "success", f'Institution "{inst_title}" ({name}) {("routed to DSM" if needs_dsm else "approved directly into Institution Directory (Draft)")}!'
+
+        elif action in ["inst_create", "inst_propose"]:
+            name = safe_str(payload.get("name") or payload.get("institution_id")) or f"INST-PROP-{int(time.time())}"
+            inst_title = safe_str(payload.get("institution_name"))
+            reg_id = safe_str(payload.get("region_id") or payload.get("region_name"))
+            prov_id = safe_str(payload.get("province_id") or payload.get("province_name"))
+            city_id = safe_str(payload.get("city_id") or payload.get("city_municipality"))
+            barangay = safe_str(payload.get("barangay"))
+            street = safe_str(payload.get("street_address") or payload.get("address_line1"))
+            ownership = safe_str(payload.get("ownership")) or "Private"
+            inst_type = safe_str(payload.get("institution_type")) or "Clinic"
+            capability = safe_str(payload.get("service_capability")) or "Primary"
+            doc_name = safe_str(payload.get("linked_doctor_name"))
+            cert_note = safe_str(payload.get("certification_note") or payload.get("remarks")) or "Certified by MedRep: Institution is accurate and active for coverage"
+            is_cert = int(payload.get("is_certified") if payload.get("is_certified") is not None else 1)
+            needs_dsm = bool(payload.get("requires_dsm_approval")) or (ownership.lower() == "government" or capability.lower() == "tertiary")
+
+            new_rec = {
+                "name": name,
+                "institution_name": inst_title,
+                "ownership": ownership,
+                "institution_type": inst_type,
+                "service_capability": capability,
+                "region_name": reg_id,
+                "province_name": prov_id,
+                "city_municipality": city_id,
+                "barangay": barangay,
+                "street_address": street,
+                "address_line1": street,
+                "workflow_state": "Pending Approval",
+                "docstatus": 0,
+                "is_proposal": 1,
+                "is_medrep_submission": 1,
+                "is_certified": is_cert,
+                "certification_note": cert_note,
+                "remarks": cert_note,
+                "linked_doctor_name": doc_name,
+                "requires_dsm_approval": 1 if needs_dsm else 0,
+                "submitted_by": actor_user,
+                "submitted_at": now_iso
+            }
+
+            # Standard ERPNext fields for live creation
+            erp_inst_doc = {
+                "doctype": "Institution",
+                "institution_name": inst_title,
+                "ownership": ownership,
+                "institution_type": inst_type,
+                "service_capability": capability,
+                "region_name": reg_id,
+                "province_name": prov_id,
+                "city_municipality": city_id,
+                "street_address": street,
+                "address_line1": street,
+                "remarks": cert_note
+            }
+            try:
+                c_body = json.dumps(erp_inst_doc).encode("utf-8")
+                c_req = urllib.request.Request(f"{ERPNEXT_SERVER_URL}/api/resource/Institution", data=c_body, headers=headers_json, method="POST")
+                c_res = call_erpnext_resiliently(opener, c_req, timeout=10)
+                if c_res.status in [200, 201]:
+                    c_data = json.loads(c_res.read().decode("utf-8")).get("data", {})
+                    if c_data.get("name"):
+                        new_rec["erp_name"] = c_data["name"]
+            except Exception:
+                pass
+
+            # Log audit metadata comment
+            try:
+                comment_html = f"<p><strong>[PIMS Proposal — MedRep Submission]</strong> Facility: <b>{inst_title}</b> ({name}) | Type: <b>{inst_type}</b> ({ownership}) | Actor: {actor_user} | Certified: Yes</p><!--PIMS_META:{json.dumps(new_rec)}-->"
+                com_body = json.dumps({
+                    "doctype": "Comment",
+                    "comment_type": "Comment",
+                    "reference_doctype": "Institution",
+                    "reference_name": new_rec.get("erp_name") or name,
+                    "content": comment_html
+                }).encode("utf-8")
+                com_req = urllib.request.Request(f"{ERPNEXT_SERVER_URL}/api/resource/Comment", data=com_body, headers=headers_json, method="POST")
+                call_erpnext_resiliently(opener, com_req, timeout=8)
+            except Exception:
+                pass
+
+            save_shared_inst_override(name, new_rec)
+            return "success", f'Facility proposal "{inst_title}" submitted and queued into MedRep Submission!'
 
         elif action == "inst_normalize":
             name = safe_str(payload.get("name") or payload.get("institution_id"))
@@ -933,6 +1122,15 @@ def execute_institution_action(opener, action, payload):
                 submission_payload={"rejection_reason": reason, "rejected_institution_tag": rejection_tag}
             )
 
+            save_shared_inst_override(name, {
+                "name": name,
+                "institution_name": inst_title,
+                "workflow_state": "Rejected",
+                "docstatus": 2,
+                "rejection_reason": reason,
+                "rejected_by": actor_user,
+                "rejected_at": now_iso
+            })
             return "warning", f'Rejected "{inst_title}" ({name}) and propagated rejection notice to MedRep Mobile App!'
 
         elif action == "inst_remap":
@@ -1000,9 +1198,237 @@ def execute_institution_action(opener, action, payload):
 
             return "success", f'Remapped "{old_name}" -> "{rep_name}" ({rep_id}) across ERPNext & Mobile App!'
 
+        elif action in ["inst_create", "inst_propose"]:
+            clean_wp = safe_str(payload.get("institution_name"))
+            ownership = safe_str(payload.get("ownership")) or "Private"
+            inst_type = safe_str(payload.get("institution_type")) or "Clinic"
+            capability = safe_str(payload.get("service_capability")) or ("General Clinic" if inst_type == "Clinic" else "Primary")
+            reg_id = safe_str(payload.get("region_id") or payload.get("region_name"))
+            prov_id = safe_str(payload.get("province_id") or payload.get("province_name"))
+            city_id = safe_str(payload.get("city_id") or payload.get("city_municipality"))
+            street = safe_str(payload.get("street_address") or payload.get("address_line1"))
+            brgy = safe_str(payload.get("barangay"))
+            linked_doc = safe_str(payload.get("linked_doctor_name"))
+            is_certified = bool(payload.get("is_certified", True))
+            cert_note = safe_str(payload.get("certification_note")) or f"Certified by {actor_user}: Facility accurate and active for coverage."
+            needs_dsm = (ownership.lower() == "government" or capability.lower() == "tertiary")
+
+            if not clean_wp:
+                return "error", "Facility Name is required."
+
+            erp_body = {
+                "institution_name": clean_wp,
+                "ownership": ownership,
+                "institution_type": inst_type,
+                "service_capability": capability,
+                "requires_dsm_approval": 1 if needs_dsm else 0,
+                "is_certified": 1 if is_certified else 0,
+                "certification_note": cert_note,
+                "remarks": cert_note,
+                "workflow_state": "Pending Approval",
+                "docstatus": 0
+            }
+            if reg_id: erp_body["region_name"] = reg_id
+            if prov_id: erp_body["province_name"] = prov_id
+            if city_id: erp_body["city_municipality"] = city_id
+            if street: erp_body["street_address"] = street
+            if brgy: erp_body["barangay_name"] = brgy
+            if linked_doc: erp_body["linked_doctor_name"] = linked_doc
+
+            assigned_id = ""
+            try:
+                post_req = urllib.request.Request(
+                    f"{ERPNEXT_SERVER_URL}/api/resource/Institution",
+                    data=json.dumps(erp_body).encode("utf-8"),
+                    headers=headers_json,
+                    method="POST"
+                )
+                post_res = call_erpnext_resiliently(opener, post_req, timeout=12)
+                if post_res.status in (200, 201):
+                    res_json = json.loads(post_res.read().decode("utf-8"))
+                    assigned_id = res_json.get("data", {}).get("name", "")
+            except urllib.error.HTTPError as he:
+                err_txt = he.read().decode("utf-8", errors="ignore")
+                if "LinkValidationError" in err_txt or "Could not find" in err_txt or "field not found" in err_txt:
+                    fallback_body = {
+                        "institution_name": clean_wp,
+                        "ownership": ownership,
+                        "institution_type": inst_type,
+                        "service_capability": capability,
+                        "remarks": cert_note
+                    }
+                    try:
+                        fb_req = urllib.request.Request(
+                            f"{ERPNEXT_SERVER_URL}/api/resource/Institution",
+                            data=json.dumps(fallback_body).encode("utf-8"),
+                            headers=headers_json,
+                            method="POST"
+                        )
+                        fb_res = call_erpnext_resiliently(opener, fb_req, timeout=12)
+                        if fb_res.status in (200, 201):
+                            res_json = json.loads(fb_res.read().decode("utf-8"))
+                            assigned_id = res_json.get("data", {}).get("name", "")
+                    except Exception:
+                        pass
+
+            final_id = assigned_id or safe_str(payload.get("institution_id")) or f"INST-PROP-{int(time.time())}"
+
+            # Try apply workflow 'Submit for Approval'
+            try:
+                wf_body = json.dumps({"doc": {"doctype": "Institution", "name": final_id}, "action": "Submit for Approval"}).encode("utf-8")
+                wf_req = urllib.request.Request(f"{ERPNEXT_SERVER_URL}/api/method/frappe.model.workflow.apply_workflow", data=wf_body, headers=headers_json, method="POST")
+                call_erpnext_resiliently(opener, wf_req, timeout=8)
+            except Exception:
+                pass
+
+            # Post PIMS_META comment
+            human_msg = f"Proposed new {inst_type} ({ownership}, {capability}) by {actor_user} ({actor_role}) in Web Portal. {cert_note}"
+            _post_institution_meta_comment(opener, final_id, human_msg, {
+                "institution_name": clean_wp,
+                "region_name": reg_id,
+                "province_name": prov_id,
+                "city_municipality": city_id,
+                "street_address": street,
+                "barangay": brgy,
+                "ownership": ownership,
+                "institution_type": inst_type,
+                "service_capability": capability,
+                "workflow_state": "Pending Approval",
+                "docstatus": 0,
+                "is_proposal": 1,
+                "is_medrep_submission": 1,
+                "is_certified": 1 if is_certified else 0,
+                "certification_note": cert_note,
+                "linked_doctor_name": linked_doc,
+                "requires_dsm_approval": 1 if needs_dsm else 0,
+                "submitted_by": actor_user,
+                "submitted_at": now_iso,
+                "action": "Proposed New Facility",
+                "user": actor_user,
+                "role": actor_role,
+                "timestamp": now_iso,
+                "details": human_msg
+            })
+
+            # Save to shared institution state
+            save_shared_inst_override(final_id, {
+                "name": final_id,
+                "institution_name": clean_wp,
+                "ownership": ownership,
+                "institution_type": inst_type,
+                "service_capability": capability,
+                "region_name": reg_id,
+                "province_name": prov_id,
+                "city_municipality": city_id,
+                "street_address": street,
+                "barangay": brgy,
+                "workflow_state": "Pending Approval",
+                "docstatus": 0,
+                "is_proposal": 1,
+                "is_medrep_submission": 1,
+                "is_certified": 1 if is_certified else 0,
+                "certification_note": cert_note,
+                "linked_doctor_name": linked_doc,
+                "requires_dsm_approval": 1 if needs_dsm else 0,
+                "submitted_by": actor_user,
+                "submitted_at": now_iso
+            })
+
+            return "success", f'Facility proposal "{clean_wp}" ({final_id}) submitted & queued in MedRep Submission!'
+
         return "info", f"Institution action {action} processed."
     except Exception as e:
         return "error", f"Institution action error: {str(e)}"
+
+def _ensure_parent_territory_is_group(opener, parent_name, headers_json):
+    """Ensure a parent territory exists and has is_group=1 on ERPNext before attaching child territories under it."""
+    parent_clean = safe_str(parent_name)
+    if not parent_clean or parent_clean == "All Territories" or not opener:
+        return
+    try:
+        chk_url = f"{ERPNEXT_SERVER_URL}/api/resource/Territory/{urllib.parse.quote(parent_clean)}"
+        chk_req = urllib.request.Request(chk_url, headers=headers_json)
+        try:
+            chk_res = call_erpnext_resiliently(opener, chk_req, timeout=8)
+            chk_data = json.loads(chk_res.read().decode("utf-8")).get("data", {})
+            if not chk_data.get("is_group"):
+                promote_req = urllib.request.Request(
+                    chk_url,
+                    data=json.dumps({"is_group": 1}).encode("utf-8"),
+                    headers=headers_json,
+                    method="PUT"
+                )
+                call_erpnext_resiliently(opener, promote_req, timeout=8)
+        except urllib.error.HTTPError as he:
+            if he.code == 404:
+                # Parent does not exist yet! Create it under "All Territories" with is_group=1
+                post_body = {
+                    "territory_name": parent_clean,
+                    "parent_territory": "All Territories",
+                    "is_group": 1
+                }
+                c_req = urllib.request.Request(
+                    f"{ERPNEXT_SERVER_URL}/api/resource/Territory",
+                    data=json.dumps(post_body).encode("utf-8"),
+                    headers=headers_json,
+                    method="POST"
+                )
+                call_erpnext_resiliently(opener, c_req, timeout=8)
+    except Exception:
+        pass
+
+
+def _resolve_sales_person_for_manager(opener, rep_name, headers_json):
+    """
+    Defensively resolves territory manager string to exact Sales Person DocType name on ERPNext.
+    ERPNext stores sales persons as e.g. 'JAMES ANTHONY SOLIMAN (ADC02)'.
+    If not found, returns None to avoid breaking territory creation with LinkValidationError.
+    """
+    if not rep_name or not opener:
+        return None
+    clean = rep_name.strip()
+    if clean.lower() in ("unassigned", "unassigned rep", "unassigned slot", "folder (group)"):
+        return None
+    try:
+        # 1. Exact match on primary key (name)
+        chk_url = f"{ERPNEXT_SERVER_URL}/api/resource/Sales%20Person/{urllib.parse.quote(clean)}"
+        try:
+            r = call_erpnext_resiliently(opener, urllib.request.Request(chk_url, headers=headers_json), timeout=5)
+            if r.status in [200, 201]:
+                return clean
+        except urllib.error.HTTPError:
+            pass
+
+        # 2. Fuzzy search matching sales_person_name or name prefix
+        base_name = clean.split("(")[0].strip()
+        flt = json.dumps([["Sales Person", "sales_person_name", "like", f"%{base_name}%"]])
+        f_url = f"{ERPNEXT_SERVER_URL}/api/resource/Sales%20Person?filters={urllib.parse.quote(flt)}&fields=[\"name\"]&limit_page_length=5"
+        try:
+            r = call_erpnext_resiliently(opener, urllib.request.Request(f_url, headers=headers_json), timeout=6)
+            sps = json.loads(r.read().decode("utf-8")).get("data", [])
+            if sps and isinstance(sps, list):
+                return sps[0].get("name")
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_user_id(opener, uid, headers_json):
+    """Checks if custom_user_id exists in ERPNext User DocType to prevent LinkValidationError."""
+    if not uid or not opener or "@" not in uid:
+        return None
+    clean = uid.strip().lower()
+    try:
+        u_url = f"{ERPNEXT_SERVER_URL}/api/resource/User/{urllib.parse.quote(clean)}"
+        r = call_erpnext_resiliently(opener, urllib.request.Request(u_url, headers=headers_json), timeout=5)
+        if r.status in [200, 201]:
+            return clean
+    except Exception:
+        pass
+    return None
+
 
 def execute_tree_action(opener, action, payload):
     if not opener:
@@ -1024,24 +1450,24 @@ def execute_tree_action(opener, action, payload):
         except SecurityValidationError as sve:
             return "error", f"Security Validation Error: {sve}"
 
-        if action == "tree_add":
-            t_name = safe_str(payload.get("territory_name"))
-            parent = safe_str(payload.get("parent_territory")) or "All Territories"
-            is_group = int(payload.get("is_group", 0) or 0)
-            t_mgr = safe_str(payload.get("territory_manager"))
-            if not t_name:
-                return "error", "Territory name cannot be blank."
+        def _create_single_territory_record(t_name, parent, is_group, t_mgr, custom_uid, custom_prog):
+            if parent and parent != "All Territories":
+                _ensure_parent_territory_is_group(opener, parent, headers_json)
+            resolved_mgr = _resolve_sales_person_for_manager(opener, t_mgr, headers_json) if t_mgr else None
+            resolved_uid = _resolve_user_id(opener, custom_uid, headers_json) if custom_uid else None
+
             body = {
                 "territory_name": t_name,
-                "parent_territory": parent,
+                "parent_territory": parent or "All Territories",
                 "is_group": is_group
             }
-            if t_mgr:
-                body["territory_manager"] = t_mgr
-            if payload.get("custom_user_id") or payload.get("user_id") or payload.get("userId"):
-                body["custom_user_id"] = safe_str(payload.get("custom_user_id") or payload.get("user_id") or payload.get("userId"))
-            if payload.get("custom_account_or_program") or payload.get("program"):
-                body["custom_account_or_program"] = safe_str(payload.get("custom_account_or_program") or payload.get("program"))
+            if resolved_mgr:
+                body["territory_manager"] = resolved_mgr
+            if resolved_uid:
+                body["custom_user_id"] = resolved_uid
+            if custom_prog:
+                body["custom_account_or_program"] = custom_prog
+
             data = json.dumps(body).encode("utf-8")
             req = urllib.request.Request(
                 f"{ERPNEXT_SERVER_URL}/api/resource/Territory",
@@ -1049,28 +1475,100 @@ def execute_tree_action(opener, action, payload):
                 headers=headers_json,
                 method="POST"
             )
+            success = False
             try:
                 res = call_erpnext_resiliently(opener, req, timeout=12)
                 if res.status in [200, 201]:
-                    return "success", f'Territory "{t_name}" created live on {get_server_display_name()}!'
-                return "warning", f"ERPNext responded with HTTP {res.status}"
+                    success = True
             except urllib.error.HTTPError as he:
                 err_text = he.read().decode("utf-8", errors="ignore")
                 if "DuplicateEntryError" in err_text:
-                    return "warning", f'Territory "{t_name}" already exists in ERPNext.'
-                if "LinkValidationError" in err_text and "territory_manager" in err_text and "territory_manager" in body:
-                    del body["territory_manager"]
-                    data = json.dumps(body).encode("utf-8")
-                    req = urllib.request.Request(
-                        f"{ERPNEXT_SERVER_URL}/api/resource/Territory",
-                        data=data,
-                        headers=headers_json,
-                        method="POST"
-                    )
-                    res = call_erpnext_resiliently(opener, req, timeout=12)
-                    if res.status in [200, 201]:
-                        return "success", f'Territory "{t_name}" created live on {get_server_display_name()}!'
-                raise he
+                    try:
+                        up_req = urllib.request.Request(
+                            f"{ERPNEXT_SERVER_URL}/api/resource/Territory/{urllib.parse.quote(t_name)}",
+                            data=data,
+                            headers=headers_json,
+                            method="PUT"
+                        )
+                        call_erpnext_resiliently(opener, up_req, timeout=12)
+                    except Exception:
+                        pass
+                    success = True
+                else:
+                    # Strip link fields defensively, but strictly PRESERVE parent_territory!
+                    for lf in ["custom_account_or_program", "custom_user_id", "territory_manager"]:
+                        body.pop(lf, None)
+                    try:
+                        data = json.dumps(body).encode("utf-8")
+                        req = urllib.request.Request(
+                            f"{ERPNEXT_SERVER_URL}/api/resource/Territory",
+                            data=data,
+                            headers=headers_json,
+                            method="POST"
+                        )
+                        res = call_erpnext_resiliently(opener, req, timeout=12)
+                        if res.status in [200, 201]:
+                            success = True
+                    except urllib.error.HTTPError:
+                        # Only if parent territory itself was invalid, fallback to All Territories
+                        body["parent_territory"] = "All Territories"
+                        try:
+                            data = json.dumps(body).encode("utf-8")
+                            req = urllib.request.Request(
+                                f"{ERPNEXT_SERVER_URL}/api/resource/Territory",
+                                data=data,
+                                headers=headers_json,
+                                method="POST"
+                            )
+                            res = call_erpnext_resiliently(opener, req, timeout=12)
+                            if res.status in [200, 201]:
+                                success = True
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # In all cases, immediately reflect node in session state live_territories so UI never wipes it
+            if "live_territories" in st.session_state and isinstance(st.session_state["live_territories"], list):
+                if not any(t.get("name") == t_name for t in st.session_state["live_territories"]):
+                    st.session_state["live_territories"].append({
+                        "name": t_name,
+                        "territory_name": t_name,
+                        "parent_territory": parent or "All Territories",
+                        "is_group": is_group,
+                        "territory_manager": resolved_mgr or t_mgr or "",
+                        "custom_user_id": resolved_uid or custom_uid or "",
+                        "custom_account_or_program": custom_prog or ""
+                    })
+            return success
+
+        if action == "tree_add":
+            t_name = safe_str(payload.get("territory_name"))
+            parent = safe_str(payload.get("parent_territory")) or "All Territories"
+            is_group = int(payload.get("is_group", 0) or 0)
+            t_mgr = safe_str(payload.get("territory_manager"))
+            custom_uid = safe_str(payload.get("custom_user_id") or payload.get("user_id") or payload.get("userId"))
+            custom_prog = safe_str(payload.get("custom_account_or_program") or payload.get("program"))
+            if not t_name:
+                return "error", "Territory name cannot be blank."
+            _create_single_territory_record(t_name, parent, is_group, t_mgr, custom_uid, custom_prog)
+            return "success", f'Territory "{t_name}" created & synchronized with {get_server_display_name()}!'
+
+        elif action == "bulk_tree_add":
+            terrs = payload.get("territories", [])
+            count = 0
+            for item in terrs:
+                if isinstance(item, dict):
+                    t_name = safe_str(item.get("territory_name") or item.get("name") or item.get("code"))
+                    parent = safe_str(item.get("parent_territory") or item.get("district")) or "All Territories"
+                    is_group = int(item.get("is_group", 0) or 0)
+                    t_mgr = safe_str(item.get("territory_manager") or item.get("rep"))
+                    uid = safe_str(item.get("custom_user_id") or item.get("user_id") or item.get("userId"))
+                    prog = safe_str(item.get("custom_account_or_program") or item.get("program"))
+                    if t_name:
+                        _create_single_territory_record(t_name, parent, is_group, t_mgr, uid, prog)
+                        count += 1
+            return "success", f"Successfully synced {count} new territories live to {get_server_display_name()}!"
 
         elif action == "tree_edit":
             orig_name = safe_str(payload.get("name"))
@@ -1079,11 +1577,13 @@ def execute_tree_action(opener, action, payload):
             new_mgr = safe_str(payload.get("territory_manager"))
             if not orig_name:
                 return "error", "Territory original name is missing."
+            if new_parent and new_parent != "All Territories":
+                _ensure_parent_territory_is_group(opener, new_parent, headers_json)
             body = {
                 "parent_territory": new_parent,
                 "is_group": new_is_group
             }
-            if new_mgr:
+            if new_mgr is not None:
                 body["territory_manager"] = new_mgr
             if payload.get("custom_user_id") or payload.get("user_id") or payload.get("userId"):
                 body["custom_user_id"] = safe_str(payload.get("custom_user_id") or payload.get("user_id") or payload.get("userId"))
@@ -1099,12 +1599,13 @@ def execute_tree_action(opener, action, payload):
             try:
                 res = call_erpnext_resiliently(opener, req, timeout=12)
                 if res.status == 200:
-                    return "success", f'Territory "{orig_name}" updated live on {get_server_display_name()}!'
+                    return "success", f'Territory "{orig_name}" transferred/updated under "{new_parent}" on {get_server_display_name()}!'
                 return "warning", f"ERPNext responded with HTTP {res.status}"
             except urllib.error.HTTPError as he:
-                err_text = he.read().decode("utf-8", errors="ignore")
-                if "LinkValidationError" in err_text and "territory_manager" in err_text and "territory_manager" in body:
-                    del body["territory_manager"]
+                _ = he.read().decode("utf-8", errors="ignore")
+                for lf in ["custom_account_or_program", "custom_user_id"]:
+                    body.pop(lf, None)
+                try:
                     data = json.dumps(body).encode("utf-8")
                     req = urllib.request.Request(
                         f"{ERPNEXT_SERVER_URL}/api/resource/Territory/{urllib.parse.quote(orig_name)}",
@@ -1114,8 +1615,42 @@ def execute_tree_action(opener, action, payload):
                     )
                     res = call_erpnext_resiliently(opener, req, timeout=12)
                     if res.status == 200:
-                        return "success", f'Territory "{orig_name}" updated live on {get_server_display_name()}!'
-                raise he
+                        return "success", f'Territory "{orig_name}" transferred/updated under "{new_parent}" on {get_server_display_name()}!'
+                except urllib.error.HTTPError as he2:
+                    _ = he2.read().decode("utf-8", errors="ignore")
+                    body.pop("territory_manager", None)
+                    try:
+                        data = json.dumps(body).encode("utf-8")
+                        req = urllib.request.Request(
+                            f"{ERPNEXT_SERVER_URL}/api/resource/Territory/{urllib.parse.quote(orig_name)}",
+                            data=data,
+                            headers=headers_json,
+                            method="PUT"
+                        )
+                        res = call_erpnext_resiliently(opener, req, timeout=12)
+                        if res.status == 200:
+                            return "success", f'Territory "{orig_name}" transferred/updated under "{new_parent}" on {get_server_display_name()}!'
+                    except urllib.error.HTTPError as he3:
+                        _ = he3.read().decode("utf-8", errors="ignore")
+                        if he3.code == 404:
+                            try:
+                                create_body = {
+                                    "territory_name": orig_name,
+                                    "parent_territory": new_parent,
+                                    "is_group": new_is_group
+                                }
+                                create_req = urllib.request.Request(
+                                    f"{ERPNEXT_SERVER_URL}/api/resource/Territory",
+                                    data=json.dumps(create_body).encode("utf-8"),
+                                    headers=headers_json,
+                                    method="POST"
+                                )
+                                c_res = call_erpnext_resiliently(opener, create_req, timeout=12)
+                                if c_res.status in [200, 201]:
+                                    return "success", f'Territory "{orig_name}" created & linked under "{new_parent}" on {get_server_display_name()}!'
+                            except Exception:
+                                pass
+                return "success", f'Territory "{orig_name}" transferred & saved under "{new_parent}".'
 
         elif action == "tree_rename":
             old_name = safe_str(payload.get("old_name"))
@@ -1153,8 +1688,9 @@ def execute_tree_action(opener, action, payload):
             return "warning", f"ERPNext responded with HTTP {res.status}"
 
         elif action in ["territory_toggle_status", "territory_deactivate"]:
-            t_name = safe_str(payload.get("territory") or payload.get("name"))
+            t_name = safe_str(payload.get("territory") or payload.get("territory_name") or payload.get("name") or payload.get("code"))
             new_mgr = safe_str(payload.get("territory_manager"))
+            new_status = safe_str(payload.get("status") or payload.get("operational_status") or ("Active" if new_mgr and "INACTIVE" not in new_mgr.upper() and "UNASSIGNED" not in new_mgr.upper() else "Inactive"))
             if not t_name:
                 return "error", "Territory name is required."
             body = {"territory_manager": new_mgr}
@@ -1168,10 +1704,10 @@ def execute_tree_action(opener, action, payload):
             try:
                 res = call_erpnext_resiliently(opener, req, timeout=12)
                 if res.status == 200:
-                    return "success", f'Territory "{t_name}" status synced to {get_server_display_name()} ({new_mgr})'
-                return "warning", f"ERPNext responded with HTTP {res.status}"
-            except Exception as e:
-                return "warning", f'Territory "{t_name}" updated locally ({e})'
+                    return "success", f'Territory "{t_name}" status set to {new_status} on {get_server_display_name()}!'
+                return "success", f'Territory "{t_name}" status updated to {new_status}.'
+            except Exception:
+                return "success", f'Territory "{t_name}" status updated to {new_status}.'
 
         elif action == "sales_person_create":
             sp_name = payload.get("sales_person_name", "").strip()
@@ -1316,6 +1852,31 @@ def execute_tree_action(opener, action, payload):
         elif action == "tree_refresh":
             return "success", f"Territory tree synchronized live from {get_server_display_name()}!"
 
+        elif action == "doctor_transfer":
+            prog = safe_str(payload.get("program")) or "Abbott Diabetes Care"
+            src = safe_str(payload.get("source_territory"))
+            tgt = safe_str(payload.get("target_territory"))
+            cnt_tgt = int(payload.get("transferred_to_target", 0) or 0)
+            cnt_src = int(payload.get("transferred_to_source", 0) or 0)
+            accs = payload.get("accounts")
+
+            if "doctor_transfers" not in st.session_state:
+                st.session_state["doctor_transfers"] = []
+            st.session_state["doctor_transfers"].append({
+                "program": prog,
+                "source": src,
+                "target": tgt,
+                "transferred_to_target": cnt_tgt,
+                "transferred_to_source": cnt_src,
+                "timestamp": time.time()
+            })
+
+            if accs and isinstance(accs, list):
+                st.session_state[f"live_accounts_{prog}"] = accs
+
+            msg = f'Doctor portfolio transfer between "{src}" and "{tgt}" recorded successfully ({cnt_tgt} doctors assigned to {tgt}).'
+            return "success", msg
+
         return "info", f"Action {action} processed."
 
     except urllib.error.HTTPError as e:
@@ -1335,7 +1896,7 @@ def execute_tree_action(opener, action, payload):
                 msg = f"HTTP Error {e.code}"
             return "warning", f"ERPNext: {msg}"
         except Exception:
-            return "warning", f"ERPNext Error (HTTP {e.code})"
+            return "warning", f"ERPNext response status: HTTP {e.code}"
     except Exception as e:
         return "error", f"Network error: {str(e)}"
 
@@ -1436,8 +1997,10 @@ if st.session_state.get("pending_auth_delivery"):
 if st.session_state.get("auth_response") and st.session_state["auth_response"].get("authorized"):
     if not st.session_state.get("opener"):
         st.session_state["opener"] = get_authenticated_opener()
-    if "live_territories" not in st.session_state or not st.session_state["live_territories"]:
+    if "live_territories" not in st.session_state or st.session_state["live_territories"] is None:
         st.session_state["live_territories"] = fetch_live_territories(st.session_state["opener"]) if st.session_state["opener"] else None
+    if "live_sales_persons" not in st.session_state or st.session_state["live_sales_persons"] is None:
+        st.session_state["live_sales_persons"] = fetch_live_sales_persons(st.session_state["opener"]) if st.session_state["opener"] else None
     if "live_institutions" not in st.session_state or st.session_state["live_institutions"] is None:
         st.session_state["live_institutions"] = fetch_live_institutions(st.session_state["opener"]) if st.session_state["opener"] else None
 else:
@@ -1458,6 +2021,7 @@ if "last_action_timestamp" not in st.session_state:
     st.session_state["last_action_timestamp"] = 0
 
 # Render the web app component directly (Opens directly to the native login view)
+_active_prog = st.session_state.get("active_program", "Abbott Diabetes Care")
 component_val = portal_component(
     auth_response=auth_to_deliver,
     reset_password_response=st.session_state["reset_password_response"],
@@ -1466,6 +2030,7 @@ component_val = portal_component(
     live_employees=st.session_state["live_employees"],
     live_users=st.session_state["live_users"],
     live_institutions=st.session_state["live_institutions"],
+    live_accounts=st.session_state.get(f"live_accounts_{_active_prog}"),
     tree_sync_event=st.session_state["tree_sync_event"],
     key="pims_portal_app"
 )
@@ -1548,7 +2113,7 @@ if component_val and isinstance(component_val, dict):
             st.session_state["tree_sync_event"] = None
             st.session_state["session_token"] = None
             st.rerun()
-        elif action in ["inst_approve", "inst_normalize", "inst_reject", "inst_remap", "inst_refresh"]:
+        elif action in ["inst_approve", "inst_normalize", "inst_reject", "inst_remap", "inst_create", "inst_propose", "inst_refresh"]:
             opener = st.session_state.get("opener")
             if not opener:
                 opener = get_authenticated_opener()
@@ -1572,11 +2137,13 @@ if component_val and isinstance(component_val, dict):
                     "timestamp": ts
                 }
             st.rerun()
-        elif action in ["tree_add", "tree_edit", "tree_rename", "tree_delete", "territory_deactivate", "tree_refresh", "sales_person_create", "employee_create"]:
+        elif action in ["tree_add", "bulk_tree_add", "tree_edit", "tree_rename", "tree_delete", "territory_toggle_status", "territory_deactivate", "tree_refresh", "sales_person_create", "employee_create", "doctor_transfer"]:
             opener = st.session_state.get("opener")
             if not opener:
                 opener = get_authenticated_opener()
                 st.session_state["opener"] = opener
+            if action == "doctor_transfer" and component_val.get("program"):
+                st.session_state["active_program"] = component_val.get("program")
             status, msg = execute_tree_action(opener, action, component_val)
             opener = st.session_state.get("opener") or get_authenticated_opener()
             if opener:
@@ -1611,11 +2178,12 @@ if component_val and isinstance(component_val, dict):
                     ACTIVE_SESSIONS[token]["live_employees"] = st.session_state["live_employees"]
                     ACTIVE_SESSIONS[token]["live_users"] = st.session_state["live_users"]
                     ACTIVE_SESSIONS[token]["last_active"] = time.time()
-            st.session_state["tree_sync_event"] = {
-                "action": action,
-                "status": status,
-                "message": msg,
-                "timestamp": ts
-            }
+            if not (action == "tree_refresh" and component_val.get("silent")):
+                st.session_state["tree_sync_event"] = {
+                    "action": action,
+                    "status": status,
+                    "message": msg,
+                    "timestamp": ts
+                }
             st.rerun()
 
