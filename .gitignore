@@ -53,3 +53,6 @@ secrets.toml
 .streamlit/secrets.toml
 *.pem
 *.key
+*openssh*
+*id_rsa*
+*.pub
