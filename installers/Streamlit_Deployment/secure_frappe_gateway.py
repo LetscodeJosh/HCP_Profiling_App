@@ -44,7 +44,7 @@ import urllib.request
 # =============================================================================
 
 # Environment-driven configuration isolated strictly from version control
-ERPNEXT_SERVER_URL = os.environ.get("ERPNEXT_URL", "https://dev.pmii-marketing.com").rstrip("/")
+ERPNEXT_SERVER_URL = os.environ.get("ERPNEXT_URL", "https://staging.pmii-marketing.com").rstrip("/")
 
 # Frappe Token / Secret credentials isolated from OS environment
 FRAPPE_API_KEY = os.environ.get("FRAPPE_API_KEY", "")
@@ -207,8 +207,8 @@ class ResourceRequestSchema:
 class TerritoryActionSchema:
     """Strict schema for territory tree manipulation RPC actions."""
     action: str
-    territory_name: str
-    parent_territory: str
+    territory_name: str = ""
+    parent_territory: str = ""
     is_group: int = 0
     territory_manager: Optional[str] = None
     custom_user_id: Optional[str] = None
@@ -222,6 +222,7 @@ class TerritoryActionSchema:
         raw_action = sanitize_string(data.get("action", ""), max_len=30, allow_spaces=False)
         allowed_actions = {
             "tree_add", "tree_edit", "tree_rename", "tree_delete", "tree_refresh",
+            "bulk_tree_add",
             "territory_toggle_status", "territory_deactivate",
             "sales_person_create", "employee_create", "doctor_transfer", "resignation_handover",
             "bulk_decommission", "bulk_archive",
@@ -231,8 +232,22 @@ class TerritoryActionSchema:
             raise SecurityValidationError(f"Disallowed action: '{raw_action}'")
 
         t_name = sanitize_string(data.get("territory_name") or data.get("name") or data.get("territory") or data.get("code") or "", max_len=140)
-        no_tname_actions = {"tree_refresh", "inst_refresh", "doctor_transfer", "resignation_handover", "bulk_decommission", "bulk_archive", "inst_create", "inst_propose"}
-        if not t_name and raw_action not in no_tname_actions:
+        no_tname_actions = {
+            "tree_refresh", "inst_refresh", "doctor_transfer", "resignation_handover",
+            "bulk_decommission", "bulk_archive", "inst_create", "inst_propose", "bulk_tree_add",
+            "sales_person_create", "employee_create"
+        }
+        if raw_action == "sales_person_create":
+            sp_name = sanitize_string(data.get("sales_person_name") or data.get("name") or "", max_len=140)
+            if not sp_name:
+                raise SecurityValidationError("sales_person_name is required")
+            t_name = t_name or sp_name
+        elif raw_action == "employee_create":
+            emp_name = sanitize_string(data.get("employee_name") or data.get("first_name") or data.get("name") or "", max_len=140)
+            if not emp_name:
+                raise SecurityValidationError("employee_name is required")
+            t_name = t_name or emp_name
+        elif not t_name and raw_action not in no_tname_actions:
             raise SecurityValidationError("territory_name is required")
 
         parent_t = sanitize_string(data.get("parent_territory") or data.get("parent") or "", max_len=140)
@@ -244,12 +259,13 @@ class TerritoryActionSchema:
         raw_uid = data.get("custom_user_id") or data.get("user_id")
         clean_uid: Optional[str] = None
         if raw_uid:
-            clean_uid = sanitize_string(raw_uid, max_len=120, allow_spaces=False).lower()
-            if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', clean_uid):
-                if clean_uid in ('unassigned', 'none', '', 'null'):
-                    clean_uid = None
-                else:
-                    raise SecurityValidationError(f"Invalid email format for custom_user_id: '{raw_uid}'")
+            clean_uid = sanitize_string(raw_uid, max_len=120, allow_spaces=False)
+            if clean_uid.lower() in ('unassigned', 'none', '', 'null'):
+                clean_uid = None
+            elif not re.match(r'^[A-Za-z0-9._%+\-]+(@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})?$', clean_uid):
+                raise SecurityValidationError(f"Invalid user ID format: '{raw_uid}'")
+            else:
+                clean_uid = clean_uid.lower()
 
         prog = sanitize_string(data.get("custom_account_or_program") or data.get("program"), max_len=100) if (data.get("custom_account_or_program") or data.get("program")) else None
 
