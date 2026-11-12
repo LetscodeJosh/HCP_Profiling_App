@@ -131,3 +131,15 @@
    * Any validation of password reset functionality must strictly use simulated/mock responses or safe sandbox dummy handles (e.g., `test-mock@example.invalid`).
    * No scratch scripts initiating credential modification or live reset dispatches may be retained or committed to the repository.
 
+## 🚀 Mandatory CI/CD Pipeline Success & Build Integrity Invariant
+1. **Perpetual Success Status**:
+   * CI/CD pipelines in the repository must ALWAYS maintain a successful status (`SUCCESS`) on every workflow run. No failing or broken runs are permitted, ensuring total project integrity, reliability, and deployment readiness.
+2. **Defensive Pipeline Configuration**:
+   * All GitHub Actions steps (linting, tests, tech debt audit, Android release APK compilation, and artifact archiving) must be verified and resilient against environment variance.
+
+## 🛑 Inviolable Active Code Protection Standard
+1. **Zero-Tampering of Active & Working Functions**:
+   * When performing bug fixes or UI refinements, automated agents and developers must NEVER tamper with, alter, or remove active and accessible functions/code that may cause an app to become unreliable or crash during deeply thorough UAT sessions.
+   * If something in the working codebase is currently active and functional, it must remain preserved and backward-compatible.
+
+
