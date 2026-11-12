@@ -131,3 +131,16 @@
    * Any validation of password reset functionality must strictly use simulated/mock responses or safe sandbox dummy handles (e.g., `test-mock@example.invalid`).
    * No scratch scripts initiating credential modification or live reset dispatches may be retained or committed to the repository.
 
+## 🚀 Mandatory 100% CI/CD Pipeline Success & Build Reliability Invariant
+1. **Perpetual Green CI/CD Standard**:
+   * The GitHub Actions CI/CD workflows across all repository branches (`main`, `sub_initial`, `sub_final`, etc.) must maintain a **100% Success Status** at all times.
+   * Build failures, test breakage, or workflow timeouts compromise project integrity, reliability, and accuracy. Any CI/CD failure must be identified, debugged, and aligned immediately to restore green status without lingering.
+2. **Deterministic Build Pinning**:
+   * All CI/CD runners must pin exact, verified runtime versions (e.g., `flutter-version: '3.47.9'`, JDK 17) to prevent upstream breaking changes from disrupting continuous integration.
+
+## 🛡️ Mandatory Bug Fixing Non-Tampering & Active Feature Protection Rule
+* **Active Code Invariance**:
+  * When performing bug fixing, **we must not tamper with the current function/code that is active and accessible** that may cause the app to be unreliable if someone notices it during a deep UAT session, or if a code modification triggers a regression or crash.
+  * Enhancements and bug resolutions must be surgically targeted, strictly additive, and fully backward-compatible with all active workflows and existing UI components.
+
+
