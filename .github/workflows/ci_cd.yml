@@ -2,10 +2,10 @@ name: HCP Profiling & Territory Reconfiguration CI/CD
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, sub_initial, sub_final ]
     tags: [ 'v*', 'V*' ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, sub_initial, sub_final ]
   workflow_dispatch:
 
 permissions:
@@ -27,6 +27,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.9'
           channel: 'stable'
           cache: true
 
@@ -64,6 +65,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.9'
           channel: 'stable'
           cache: true
 
@@ -112,6 +114,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.9'
           channel: 'stable'
           cache: true
 

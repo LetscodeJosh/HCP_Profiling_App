@@ -145,6 +145,7 @@ class Institution {
   /// - 'Draft' (Red - matches ERPNext initial masterlist import / draft state)
   /// - 'Rejected' (Red)
   String get status {
+    if (isRejected) return 'Rejected';
     final state = (workflowState ?? '').trim();
     if (state.isNotEmpty) {
       final lower = state.toLowerCase();
@@ -154,7 +155,7 @@ class Institution {
         return 'For SFE Approval';
       }
       if (lower == 'draft') return 'Draft';
-      if (lower == 'rejected') return 'Rejected';
+      if (lower.contains('reject')) return 'Rejected';
       return state;
     }
     if (docstatus == 1) return 'Approved';
@@ -163,13 +164,23 @@ class Institution {
   }
 
   bool get isDraft {
+    if (isRejected) return false;
     final state = (workflowState ?? '').trim().toLowerCase();
     return state == 'draft' || (state.isEmpty && docstatus == 0);
   }
 
   bool get isRejected {
     final state = (workflowState ?? '').trim().toLowerCase();
-    return state == 'rejected';
+    if (state == 'rejected' || state.contains('reject')) return true;
+    if (state == 'pending approval' ||
+        state == 'pending sfe approval' ||
+        state == 'for sfe approval' ||
+        state == 'pending dsm approval' ||
+        state == 'approved') {
+      return false;
+    }
+    if (rejectionReason != null && rejectionReason!.trim().isNotEmpty && docstatus != 1) return true;
+    return false;
   }
 
   bool get isRemapped {
@@ -184,8 +195,9 @@ class Institution {
   }
 
   bool get isApproved {
+    if (isRejected) return false;
     final state = (workflowState ?? '').trim().toLowerCase();
-    return state == 'approved' || docstatus == 1;
+    return state == 'approved' || (docstatus == 1 && !isRejected);
   }
 
   /// Whether this institution can be used by the MedRep for doctor profiling & coverage.
@@ -2150,6 +2162,7 @@ class LocationResolver {
   static bool isRejectedInstitution(String? raw, [List<Institution>? dynamicInsts]) {
     if (raw == null || raw.trim().isEmpty || raw.trim() == '-') return false;
     final trimmed = raw.trim().toLowerCase();
+    if (raw.toUpperCase().contains('REJECTED')) return true;
     if (dynamicInsts != null && dynamicInsts.isNotEmpty) {
       final found = dynamicInsts.firstWhere(
         (i) => i.name.toLowerCase() == trimmed || i.institutionName.toLowerCase() == trimmed,
@@ -2175,6 +2188,11 @@ class LocationResolver {
       if (found.name.isNotEmpty && found.isRejected && !found.isRemapped) {
         return found.rejectionReason?.trim();
       }
+    }
+    final regExp = RegExp(r'\[REJECTED INSTITUTION:\s*([^\]]+)\]', caseSensitive: false);
+    final match = regExp.firstMatch(raw);
+    if (match != null) {
+      return match.group(1)?.trim();
     }
     return null;
   }

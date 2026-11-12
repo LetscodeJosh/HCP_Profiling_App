@@ -1,0 +1,16 @@
+{
+  "version": "v.0.8.1",
+  "build_number": 52,
+  "release_date": "2026-11-12",
+  "apk_file": "HCP_Profiling_V.0.8.1.apk",
+  "web_installer_exe": "Territory_Reconfiguration_Setup.exe",
+  "web_installer_zip": "Territory_Reconfiguration_Setup.zip",
+  "highlights": [
+    "Bi-directional SFE Institution Approval synchronization between HCP Profiling Mobile App and Territory Reconfiguration Web Portal",
+    "Frappe Comment query updated to descending order (order_by=creation desc) with chronological priority to ensure recent rejections are never clipped by pagination",
+    "Bi-directional cache reconciliation: linked HCP Accounts, Doctors, and HCP Profile Submissions with rejection notes back-propagate to local institution records",
+    "System lockscreen and heads-up pop-up notification delivery for MedRep users when proposed institutions are rejected by SFE",
+    "Prominent red rejection badges and callout notices displayed across Institution Directory and Institution Submission screens"
+  ]
+}
+

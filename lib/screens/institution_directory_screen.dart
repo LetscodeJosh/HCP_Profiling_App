@@ -700,6 +700,34 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
                 ],
               ),
             ),
+
+            // Rejection reason callout banner
+            if (inst.isRejected) ...[
+              const SizedBox(height: 8),
+              Container(
+                margin: const EdgeInsets.only(left: 30),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFF87171), width: 1.0),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.report_problem_rounded, color: Color(0xFFDC2626), size: 14),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        inst.rejectionReason != null && inst.rejectionReason!.trim().isNotEmpty
+                            ? 'REJECTED: ${inst.rejectionReason!.trim()}'
+                            : '[REJECTED INSTITUTION]',
+                        style: const TextStyle(color: Color(0xFFB91C1C), fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),

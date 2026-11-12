@@ -221,7 +221,12 @@ class NotificationService {
         // If owner matches, or if no target user specified, notify
         bool isMatch = false;
         if (targetUser != null && targetUser.isNotEmpty) {
-          isMatch = owner.isEmpty || owner == targetUser || owner.contains(targetUser) || targetUser.contains(owner);
+          isMatch = owner.isEmpty ||
+                    owner == 'medrep' ||
+                    owner == 'administrator' ||
+                    owner == targetUser ||
+                    owner.contains(targetUser) ||
+                    targetUser.contains(owner);
         } else {
           isMatch = true;
         }

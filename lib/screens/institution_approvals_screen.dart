@@ -1075,11 +1075,14 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
 
     // For MedRep / Sales User / Manager
     final isManager = apiService.isManager || apiService.isAdmin;
+    final submittedOrActionable = apiService.cachedInstitutions
+        .where((i) => i.isRejected || i.isPendingApproval || i.workflowState == 'Pending DSM Approval' || i.isCustom)
+        .toList();
     final requests = isManager
         ? apiService.cachedInstitutions
         : (apiService.mySubmittedInstitutions.isNotEmpty
             ? apiService.mySubmittedInstitutions
-            : apiService.cachedInstitutions);
+            : (submittedOrActionable.isNotEmpty ? submittedOrActionable : apiService.cachedInstitutions));
     final pendingCount = requests.where((i) => i.isPendingApproval && i.workflowState != 'Pending DSM Approval').length;
     final dsmPendingCount = requests.where((i) => i.workflowState == 'Pending DSM Approval').length;
     final approvedCount = requests.where((i) => i.isApproved).length;

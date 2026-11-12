@@ -5,6 +5,23 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ---
 
+## [v.0.8.1] - 2026-11-12
+
+### 🏥 Bi-Directional SFE Institution Approval Synchronization & Lockscreen Rejection Notifications
+- **Descending Comment Hydration (`order_by=creation desc`)**:
+  - Resolved Frappe comment pagination truncation flaw where ascending comment order clipped recent proposal reviews; updated comment query in `ApiService.fetchInstitutions()` and `app.py` to `order_by=creation desc&limit_page_length=2500` with chronological sorting.
+- **Bi-Directional Cache Reconciliation (`_reconcileInstitutionStateAcrossCaches`)**:
+  - Implemented automatic back-propagation from `HcpAccount`, `Doctor`, and `HcpProfileSubmission` linked rejection tags (`[REJECTED INSTITUTION: ...]`) to `_cachedInstitutions` ensuring instantaneous reflection of SFE rejections even before comment network round-trips.
+- **Dynamic Rejection & Status Resolution (`Institution.isRejected`, `LocationResolver.isRejectedInstitution`)**:
+  - Expanded `Institution.isRejected` to accurately detect all rejected states and rejection reasons while cleanly respecting pending resubmissions and approved facilities.
+  - Enhanced `LocationResolver.isRejectedInstitution` and `getRejectedInstitutionReason` to recognize embedded rejection tags and reasons.
+- **Prominent Mobile UI Rejection Badges & Callout Banners**:
+  - Added visible rejection reason callouts in `InstitutionDirectoryScreen` aligned rows and guaranteed full MedRep visibility of rejected facility proposals in `InstitutionApprovalsScreen`.
+- **Heads-Up & Lockscreen Rejection Alerts (`NotificationService`)**:
+  - Broadened owner matching in `NotificationService.checkAndNotifyPendingRejections` to reliably deliver lockscreen and heads-up alerts when an SFE Specialist rejects a proposed facility.
+
+---
+
 ## [v.0.8.0] - 2026-11-04
 
 ### 📋 DPA of 2012 Compliant Consent Naming via Employee `Company *` & `Branch` Lookup
