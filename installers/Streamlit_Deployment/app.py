@@ -372,30 +372,110 @@ INJECTION_PATTERN = re.compile(
     re.IGNORECASE
 )
 
-STREAMLIT_RESET_REQUESTS = {}
-STREAMLIT_LOGIN_ATTEMPTS = {}
+MAX_LOGIN_ATTEMPTS = 6
+LOGIN_COOLDOWN_SECONDS = 5 * 60
+
+@st.cache_resource
+def _get_security_rate_limit_store():
+    return {
+        "reset_requests": {},
+        "login_attempts": {}
+    }
+
+_SECURITY_STORE = _get_security_rate_limit_store()
+STREAMLIT_RESET_REQUESTS = _SECURITY_STORE["reset_requests"]
+STREAMLIT_LOGIN_ATTEMPTS = _SECURITY_STORE["login_attempts"]
+
+def _extract_frappe_error_message(raw_body, fallback_msg):
+    """Extract a human-readable error message from a Frappe JSON/HTTP error response."""
+    if not raw_body:
+        return fallback_msg
+    try:
+        err_data = json.loads(raw_body)
+        if isinstance(err_data, dict):
+            if err_data.get("_server_messages"):
+                msgs = json.loads(err_data["_server_messages"])
+                if isinstance(msgs, list) and msgs:
+                    first = msgs[0]
+                    parsed = json.loads(first) if isinstance(first, str) and first.startswith("{") else {"message": str(first)}
+                    clean_m = re.sub(r"<[^>]+>", "", str(parsed.get("message") or parsed)).strip()
+                    if clean_m:
+                        return clean_m
+            if err_data.get("message"):
+                return re.sub(r"<[^>]+>", "", str(err_data["message"])).strip()
+            if err_data.get("exception"):
+                return str(err_data["exception"]).splitlines()[-1].strip()
+    except Exception:
+        pass
+    return fallback_msg
+
+
+def _resolve_reset_user_email(clean_user):
+    """Resolve an ERPNext username to its login email when '@' is omitted."""
+    if "@" in clean_user:
+        return clean_user
+    try:
+        opener = get_authenticated_opener()
+        if not opener:
+            return clean_user
+        for field in ("username", "name"):
+            filters = urllib.parse.quote(json.dumps([["User", field, "=", clean_user]]))
+            fields = urllib.parse.quote(json.dumps(["name", "email"]))
+            url = f"{ERPNEXT_SERVER_URL}/api/resource/User?filters={filters}&fields={fields}&limit_page_length=1"
+            req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"})
+            with opener.open(req, timeout=8) as res:
+                data = json.loads(res.read().decode("utf-8")).get("data", [])
+                if data and isinstance(data, list):
+                    resolved = (data[0].get("email") or data[0].get("name") or "").strip()
+                    if resolved:
+                        return resolved
+    except Exception:
+        pass
+    return clean_user
+
 
 def request_erpnext_password_reset(user_email):
     """
-    Safely processes password reset requests with cyber-grade security.
-    STRICT SECURITY INVARIANT: Under NO circumstances will automated test reset emails
-    be dispatched to real employees on live ERPNext instances (staging.pmii-marketing.com).
+    Safely validates and dispatches a password reset link email via ERPNext's
+    /api/method/frappe.core.doctype.user.user.reset_password endpoint.
     """
     if not user_email or not isinstance(user_email, str):
         return {
             "success": False,
-            "message": "ERPNext username or email address is required."
+            "message": "ERPNext email address or username is required."
         }
 
     clean_user = user_email.strip()
+    if not clean_user:
+        return {
+            "success": False,
+            "message": "ERPNext email address or username is required."
+        }
+
     if INJECTION_PATTERN.search(clean_user):
         return {
             "success": False,
-            "message": "⚠️ SECURITY VIOLATION: Malicious command injection or forbidden characters detected in reset request."
+            "message": "SECURITY VIOLATION: Malicious command injection or forbidden characters detected in reset request."
+        }
+
+    ident = clean_user.lower()
+    target_email = _resolve_reset_user_email(clean_user)
+    target_ident = target_email.lower()
+    rec_ident = STREAMLIT_LOGIN_ATTEMPTS.get(ident, (0, 0))
+    rec_target = STREAMLIT_LOGIN_ATTEMPTS.get(target_ident, (0, 0))
+    max_failed = max(
+        int(rec_ident[0] or 0),
+        int(rec_target[0] or 0),
+        _get_session_failed_attempts(ident),
+        _get_session_failed_attempts(target_ident),
+    )
+    if max_failed < MAX_LOGIN_ATTEMPTS:
+        return {
+            "success": False,
+            "message": f"Password reset is only permitted after {MAX_LOGIN_ATTEMPTS} failed login attempts for '{clean_user}'."
         }
 
     # Rate limiting: max 3 requests per 15 minutes
-    ident = clean_user.lower()
     now = time.time()
     req_record = STREAMLIT_RESET_REQUESTS.get(ident, (0, 0))
     count, reset_window = req_record
@@ -403,21 +483,141 @@ def request_erpnext_password_reset(user_email):
         if count >= 3:
             return {
                 "success": False,
-                "message": "⚠️ Rate Limit Exceeded: Maximum 3 password reset requests per 15 minutes. Please contact your System Administrator."
+                "message": "Rate Limit Exceeded: Maximum 3 password reset requests per 15 minutes. Please contact your System Administrator."
             }
         STREAMLIT_RESET_REQUESTS[ident] = (count + 1, reset_window)
     else:
         STREAMLIT_RESET_REQUESTS[ident] = (1, now + 15 * 60)
 
-    # Safe enterprise acknowledgment without disruptive email spam to employees
-    print(f"[SECURITY AUDIT] Password reset request safely logged for user: '{clean_user}' in Streamlit environment.")
+    reset_url = f"{ERPNEXT_SERVER_URL}/api/method/frappe.core.doctype.user.user.reset_password"
+    payload = urllib.parse.urlencode({"user": target_email}).encode("utf-8")
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) PIMS-Streamlit-Client"
+    }
+
+    opener, _ = create_erpnext_opener()
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request(reset_url, data=payload, headers=headers)
+            with opener.open(req, timeout=12) as res:
+                raw_body = res.read().decode("utf-8", errors="replace")
+                res_data = json.loads(raw_body) if raw_body else {}
+                msg_val = str(res_data.get("message", "") if isinstance(res_data, dict) else res_data).strip()
+                msg_lower = msg_val.lower()
+                if msg_lower == "not found" or "not found" in msg_lower or "no user" in raw_body.lower():
+                    return {
+                        "success": False,
+                        "message": f"No ERPNext account found for '{clean_user}'. Please enter the email address used to log in."
+                    }
+                if "disabled" in msg_lower:
+                    return {
+                        "success": False,
+                        "message": f"Account '{clean_user}' is disabled in ERPNext. Please contact your System Administrator."
+                    }
+                STREAMLIT_LOGIN_ATTEMPTS.pop(ident, None)
+                STREAMLIT_LOGIN_ATTEMPTS.pop(target_email.lower(), None)
+                try:
+                    sess_attempts = st.session_state.get("sfe_failed_login_attempts")
+                    if isinstance(sess_attempts, dict):
+                        sess_attempts.pop(ident, None)
+                        sess_attempts.pop(target_email.lower(), None)
+                except Exception:
+                    pass
+                print(f"[SECURITY AUDIT] ERPNext password reset link dispatched for user: '{target_email}'.")
+                return {
+                    "success": True,
+                    "message": f"Password reset link has been sent to '{target_email}'. Please check your email inbox (and spam/junk folder) to reset your password."
+                }
+        except urllib.error.HTTPError as he:
+            if he.code in (401, 403) and attempt == 0:
+                auth_opener = get_authenticated_opener()
+                if auth_opener:
+                    opener = auth_opener
+                    continue
+            raw_err = ""
+            try:
+                raw_err = he.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            err_msg = _extract_frappe_error_message(raw_err, f"ERPNext server returned HTTP {he.code}")
+            if "not found" in err_msg.lower() or "does not exist" in err_msg.lower():
+                err_msg = f"No ERPNext account found for '{clean_user}'. Please enter the email address used to log in."
+            return {
+                "success": False,
+                "message": f"ERPNext Password Reset Error: {err_msg}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Unable to reach ERPNext server ({get_server_display_name()}): {str(e)}"
+            }
+
     return {
-        "success": True,
-        "message": f"Password reset request received for '{clean_user}'. For security and compliance, if this account exists in ERPNext, please contact your System Administrator or check your official company portal to proceed."
+        "success": False,
+        "message": "Unable to complete password reset request. Please try again."
     }
 
 
-def verify_erpnext_credentials(usr, pwd):
+def _get_session_failed_attempts(ident):
+    """Retrieve failed attempt count for ident stored in st.session_state."""
+    try:
+        store = st.session_state.get("sfe_failed_login_attempts")
+        if isinstance(store, dict):
+            return int(store.get(ident, 0) or 0)
+        if isinstance(store, (int, float)):
+            return int(store)
+    except Exception:
+        pass
+    return 0
+
+
+def _set_session_failed_attempts(ident, count):
+    """Persist failed attempt count for ident in st.session_state."""
+    try:
+        store = st.session_state.get("sfe_failed_login_attempts")
+        if not isinstance(store, dict):
+            store = {}
+            st.session_state["sfe_failed_login_attempts"] = store
+        if count <= 0:
+            store.pop(ident, None)
+        else:
+            store[ident] = int(count)
+    except Exception:
+        pass
+
+
+def _record_failed_login_attempt(ident, base_count, now, failure_prefix):
+    """Increment login attempt counter consistently and return auth error payload."""
+    new_count = min(MAX_LOGIN_ATTEMPTS, max(0, int(base_count)) + 1)
+    remaining = max(0, MAX_LOGIN_ATTEMPTS - new_count)
+    if new_count >= MAX_LOGIN_ATTEMPTS:
+        lockout_seconds = LOGIN_COOLDOWN_SECONDS
+        mm, ss = divmod(lockout_seconds, 60)
+        STREAMLIT_LOGIN_ATTEMPTS[ident] = (new_count, now + lockout_seconds)
+        _set_session_failed_attempts(ident, new_count)
+        return {
+            "success": False,
+            "authorized": False,
+            "locked_user": ident,
+            "failed_attempts": new_count,
+            "remaining_attempts": 0,
+            "lockout_remaining_seconds": lockout_seconds,
+            "message": f"Maximum {MAX_LOGIN_ATTEMPTS} login attempts reached. Cooldown remaining: {mm:02d}:{ss:02d} before you can enter your credentials again."
+        }
+    STREAMLIT_LOGIN_ATTEMPTS[ident] = (new_count, 0)
+    _set_session_failed_attempts(ident, new_count)
+    return {
+        "success": False,
+        "authorized": False,
+        "failed_attempts": new_count,
+        "remaining_attempts": remaining,
+        "message": f"{failure_prefix} Remaining Attempt: {remaining}"
+    }
+
+
+def verify_erpnext_credentials(usr, pwd, client_failed_attempts=0):
     if not usr or not pwd:
         return {
             "success": False,
@@ -428,28 +628,54 @@ def verify_erpnext_credentials(usr, pwd):
     usr = usr.strip()
     ident = usr.lower()
 
-    # Check brute-force lockout
+    # Check brute-force lockout across persistent cache store and session state
     now = time.time()
     record = STREAMLIT_LOGIN_ATTEMPTS.get(ident, (0, 0))
-    count, lockout_until = record
+    record_count, lockout_until = record
+    sess_count = _get_session_failed_attempts(ident)
     if lockout_until > now:
-        mins = int((lockout_until - now) // 60) + 1
+        rem_seconds = max(1, int(round(lockout_until - now)))
+        mm, ss = divmod(rem_seconds, 60)
         return {
             "success": False,
             "authorized": False,
-            "message": f"🔒 Maximum 5 login attempts reached. Access locked for {mins} minute(s)."
+            "locked_user": usr,
+            "failed_attempts": MAX_LOGIN_ATTEMPTS,
+            "remaining_attempts": 0,
+            "lockout_remaining_seconds": rem_seconds,
+            "message": f"Maximum {MAX_LOGIN_ATTEMPTS} login attempts reached. Cooldown remaining: {mm:02d}:{ss:02d} before you can enter your credentials again."
         }, None
     elif lockout_until > 0 and lockout_until <= now:
         STREAMLIT_LOGIN_ATTEMPTS.pop(ident, None)
-        count = 0
+        _set_session_failed_attempts(ident, 0)
+        record_count = 0
+        sess_count = 0
+    elif record_count >= MAX_LOGIN_ATTEMPTS:
+        STREAMLIT_LOGIN_ATTEMPTS.pop(ident, None)
+        _set_session_failed_attempts(ident, 0)
+        record_count = 0
+        sess_count = 0
+
+    max_prior = MAX_LOGIN_ATTEMPTS - 1
+    try:
+        client_count = max(0, min(max_prior, int(client_failed_attempts or 0)))
+    except (ValueError, TypeError):
+        client_count = 0
+    base_count = min(max_prior, max(int(record_count or 0), int(sess_count or 0), client_count))
 
     # Security Intrusion Mitigation: Block SQL / Command / Script Injection Attacks on username
     if INJECTION_PATTERN.search(usr):
-        STREAMLIT_LOGIN_ATTEMPTS[ident] = (count + 1, now + 15 * 60)
+        STREAMLIT_LOGIN_ATTEMPTS[ident] = (MAX_LOGIN_ATTEMPTS, now + LOGIN_COOLDOWN_SECONDS)
+        _set_session_failed_attempts(ident, MAX_LOGIN_ATTEMPTS)
+        mm, ss = divmod(LOGIN_COOLDOWN_SECONDS, 60)
         return {
             "success": False,
             "authorized": False,
-            "message": "⚠️ SECURITY VIOLATION: Malicious injection attempt detected in username. Request blocked and access restricted."
+            "locked_user": usr,
+            "failed_attempts": MAX_LOGIN_ATTEMPTS,
+            "remaining_attempts": 0,
+            "lockout_remaining_seconds": LOGIN_COOLDOWN_SECONDS,
+            "message": "SECURITY VIOLATION: Malicious injection attempt detected in username. Request blocked and access restricted."
         }, None
 
     # STRICT SECURITY: Create an isolated opener with an empty CookieJar for each attempt
@@ -475,28 +701,19 @@ def verify_erpnext_credentials(usr, pwd):
             break
         except urllib.error.HTTPError as e:
             if e.code == 401:
-                new_count = count + 1
-                if new_count >= 5:
-                    STREAMLIT_LOGIN_ATTEMPTS[ident] = (new_count, now + 15 * 60)
-                    return {
-                        "success": False,
-                        "authorized": False,
-                        "message": "🔒 Maximum 5 login attempts reached. Access locked for 15 minutes."
-                    }, None
-                STREAMLIT_LOGIN_ATTEMPTS[ident] = (new_count, 0)
-                return {
-                    "success": False,
-                    "authorized": False,
-                    "message": f"Invalid username or password. Please verify your ERPNext credentials. (Attempt {new_count} of 5)"
-                }, None
+                return _record_failed_login_attempt(
+                    ident,
+                    base_count,
+                    now,
+                    "Invalid username or password. Please verify your ERPNext credentials."
+                ), None
             if attempt == max_retries - 1:
-                new_count = count + 1
-                STREAMLIT_LOGIN_ATTEMPTS[ident] = (new_count, 0)
-                return {
-                    "success": False,
-                    "authorized": False,
-                    "message": f"ERPNext authentication error (HTTP {e.code}). Please try again. (Attempt {new_count} of 5)"
-                }, None
+                return _record_failed_login_attempt(
+                    ident,
+                    base_count,
+                    now,
+                    f"ERPNext authentication error (HTTP {e.code}). Please try again."
+                ), None
         except Exception as e:
             if attempt == max_retries - 1:
                 server_host = get_server_display_name()
@@ -508,13 +725,12 @@ def verify_erpnext_credentials(usr, pwd):
             time.sleep(0.5)
 
     if login_data.get("message") != "Logged In":
-        new_count = count + 1
-        STREAMLIT_LOGIN_ATTEMPTS[ident] = (new_count, 0)
-        return {
-            "success": False,
-            "authorized": False,
-            "message": f"Authentication failed on ERPNext. (Attempt {new_count} of 5)"
-        }, None
+        return _record_failed_login_attempt(
+            ident,
+            base_count,
+            now,
+            "Authentication failed on ERPNext."
+        ), None
 
     # Verify that a new valid sid cookie was genuinely issued into the isolated jar
     has_sid = any(c.name == 'sid' and c.value and c.value != 'Guest' for c in isolated_jar)
@@ -527,6 +743,7 @@ def verify_erpnext_credentials(usr, pwd):
 
     # Success! Reset failed attempts for this user
     STREAMLIT_LOGIN_ATTEMPTS.pop(ident, None)
+    _set_session_failed_attempts(ident, 0)
 
     full_name = login_data.get("full_name") or usr
 
@@ -2279,15 +2496,22 @@ if "pending_auth_delivery" not in st.session_state:
     st.session_state["pending_auth_delivery"] = False
 if "reset_password_response" not in st.session_state:
     st.session_state["reset_password_response"] = None
+if "pending_reset_delivery" not in st.session_state:
+    st.session_state["pending_reset_delivery"] = False
 if "opener" not in st.session_state:
     st.session_state["opener"] = None
 
-# Single-delivery auth response: deliver ONLY during the active login dispatch cycle.
-# On subsequent browser page refreshes (F5) or reboots, deliver None so the web app always opens on the Login Page!
+# Single-delivery auth and reset responses: deliver ONLY during the active dispatch cycle.
+# On subsequent browser page refreshes (F5) or reboots, deliver None so the web app always opens cleanly on the Login Page!
 auth_to_deliver = None
 if st.session_state.get("pending_auth_delivery"):
     auth_to_deliver = st.session_state.get("auth_response")
     st.session_state["pending_auth_delivery"] = False
+
+reset_to_deliver = None
+if st.session_state.get("pending_reset_delivery"):
+    reset_to_deliver = st.session_state.get("reset_password_response")
+    st.session_state["pending_reset_delivery"] = False
 
 # Only attempt authenticated opener and live fetch if an authorized session is active
 if st.session_state.get("auth_response") and st.session_state["auth_response"].get("authorized"):
@@ -2320,7 +2544,7 @@ if "last_action_timestamp" not in st.session_state:
 _active_prog = st.session_state.get("active_program", "Abbott Diabetes Care")
 component_val = portal_component(
     auth_response=auth_to_deliver,
-    reset_password_response=st.session_state["reset_password_response"],
+    reset_password_response=reset_to_deliver,
     live_territories=st.session_state["live_territories"],
     live_sales_persons=st.session_state["live_sales_persons"],
     live_employees=st.session_state["live_employees"],
@@ -2342,7 +2566,11 @@ if component_val and isinstance(component_val, dict):
         if action == "login":
             usr = component_val.get("usr")
             pwd = component_val.get("pwd")
-            res, opener = verify_erpnext_credentials(usr, pwd)
+            res, opener = verify_erpnext_credentials(
+                usr,
+                pwd,
+                client_failed_attempts=component_val.get("failed_attempts", 0)
+            )
             st.session_state["auth_response"] = res
             st.session_state["pending_auth_delivery"] = True
             if res.get("authorized") and opener:
@@ -2390,6 +2618,7 @@ if component_val and isinstance(component_val, dict):
                 "success": reset_res.get("success", False),
                 "message": reset_res.get("message", "")
             }
+            st.session_state["pending_reset_delivery"] = True
             st.rerun()
         elif action == "logout":
             token = st.session_state.get("session_token") or get_query_param("sfe_session")
@@ -2399,6 +2628,7 @@ if component_val and isinstance(component_val, dict):
             st.session_state["auth_response"] = None
             st.session_state["pending_auth_delivery"] = False
             st.session_state["reset_password_response"] = None
+            st.session_state["pending_reset_delivery"] = False
             st.session_state["opener"] = None
             _get_shared_opener_store()["opener"] = None
             st.session_state["live_territories"] = None

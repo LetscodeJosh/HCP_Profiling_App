@@ -63,31 +63,350 @@
   })();
 
   // =========================================================================
-  // SFE USER GUIDE & SUBTEXT GUIDANCE ENGINE (v.0.1.0)
+  // INTERACTIVE FEATURE SPOTLIGHT TOUR ENGINE (GCash-style First-Time Coach Marks)
   // =========================================================================
   let isGuideModeActive = false;
+  let activeTourKey = null;
+  let activeTourIndex = 0;
+
+  const INTERACTIVE_TOUR_FLOWS = {
+    onboarding: [
+      {
+        selector: '#headerProgramGroup',
+        title: 'Select Active Program',
+        desc: 'Switch between Abbott Diabetes Care, Bayer Consumer Health, RiteMed, and Vivaro here before editing.'
+      },
+      {
+        selector: '#btn-tab-editor',
+        title: 'Reconfiguration Editor',
+        desc: 'Open your main workspace to inspect and manage live ERPNext territories.'
+      },
+      {
+        selector: '#btnEditorActionsDropdown',
+        title: 'Workbench Actions',
+        desc: 'Use Actions to Add Territories, Batch Rename Codes, Transfer Doctors, Switch Tree/Grid View, or Export CSV.'
+      },
+      {
+        selector: '#territoryTreeToolbar, #erpGridFilterToolbar',
+        title: 'Territory Tree & Filter Bar',
+        desc: 'Filter territories, expand or collapse branches, add new nodes, or switch views directly from this workspace.'
+      },
+      {
+        selector: '#btn-tab-realignment',
+        title: 'Realignment Overview & Archive',
+        desc: 'Review decommissioned or archived territory clusters here with zero doctor profiling loss.'
+      },
+      {
+        selector: '#btn-tab-summary',
+        title: 'Summary Report & Audit Trail',
+        desc: 'Check live KPIs and track every code change, rep transfer, and approval timestamp.'
+      },
+      {
+        selector: '#btn-tab-institutions',
+        title: 'Institution Approvals',
+        desc: 'Review, normalize, and approve facility proposals submitted from the HCP Mobile App.'
+      }
+    ],
+    'tab-realignment': [
+      {
+        selector: '#archiveFolderTrigger',
+        title: 'Archived Territories Folder',
+        desc: 'Click this header to expand archived territories and switch between Card View and Table Vault View.'
+      }
+    ],
+    'tab-summary': [
+      {
+        selector: '.kpi-grid',
+        title: 'Live Reconfiguration KPIs',
+        desc: 'Monitor total territories, renamed codes, rep transfers, and archived nodes at a glance.'
+      },
+      {
+        selector: '#auditFilterField',
+        title: 'Audit Log Filter & Export',
+        desc: 'Filter logs by Action Type, Territory Code, or User, or export the ledger as CSV.'
+      }
+    ],
+    'tab-institutions': [
+      {
+        selector: '#sfeInstNavCards',
+        title: 'Governance Queue Cards',
+        desc: 'Click any status card (MedRep Submission, Institution Directory, Pending DSM Approval, Rejected, Certified) to filter the list.'
+      },
+      {
+        selector: '#sfeInstSearchInput',
+        title: 'Search & Classification Filters',
+        desc: 'Search by INST ID, facility name, or PSGC location, and refine by Ownership or Facility Type.'
+      }
+    ],
+    'grid-view': [
+      {
+        selector: '#erpGridFilterToolbar',
+        title: 'Table Grid Search & Status Filters',
+        desc: 'Search across columns or toggle Active, Vacant, and Inactive territory status checkboxes.'
+      }
+    ]
+  };
+
+  function getTourStorageKey(flowKey) {
+    let userKey = 'default';
+    try {
+      const email = authenticatedUser && (authenticatedUser.email || authenticatedUser.full_name);
+      if (email) userKey = String(email).trim().toLowerCase().replace(/[^a-z0-9@._-]/g, '_');
+    } catch (_) {}
+    return `pims_sfe_tour_v2_${userKey}_${flowKey}`;
+  }
+
+  function resolveTourTargetElement(step) {
+    if (!step || !step.selector || typeof document === 'undefined') return null;
+    const selectors = String(step.selector).split(',').map(s => s.trim()).filter(Boolean);
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el) {
+        const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : { width: 1, height: 1 };
+        const style = (typeof window !== 'undefined' && window.getComputedStyle) ? window.getComputedStyle(el) : null;
+        if ((!style || style.display !== 'none') && (rect.width > 0 || rect.height > 0)) {
+          return el;
+        }
+      }
+    }
+    return document.querySelector(selectors[0]) || null;
+  }
+
+  function positionInteractiveTourCard(targetEl) {
+    const spotlight = document.getElementById('interactiveTourSpotlight');
+    const card = document.getElementById('interactiveTourCard');
+    const arrow = document.getElementById('interactiveTourArrow');
+    if (!card || !spotlight) return;
+
+    const vw = Math.min((typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 1280, (typeof document !== 'undefined' && document.documentElement && document.documentElement.clientWidth) ? document.documentElement.clientWidth : 1280);
+    const vh = Math.min((typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 720, (typeof document !== 'undefined' && document.documentElement && document.documentElement.clientHeight) ? document.documentElement.clientHeight : 720);
+
+    let rect = null;
+    if (targetEl && typeof targetEl.getBoundingClientRect === 'function') {
+      const r = targetEl.getBoundingClientRect();
+      if (r && (r.width > 0 || r.height > 0)) {
+        rect = r;
+      }
+    }
+
+    if (!rect) {
+      spotlight.style.display = 'none';
+      if (arrow) arrow.style.display = 'none';
+      card.style.left = `${Math.max(16, Math.round((vw - 340) / 2))}px`;
+      card.style.top = `${Math.max(16, Math.round((vh - 210) / 2))}px`;
+      return;
+    }
+
+    const pad = 6;
+    const spotLeft = Math.max(4, Math.round(rect.left - pad));
+    const spotTop = Math.max(4, Math.round(rect.top - pad));
+    const spotWidth = Math.min(vw - spotLeft - 4, Math.round(rect.width + pad * 2));
+    const spotHeight = Math.min(vh - spotTop - 12, Math.round(rect.height + pad * 2));
+
+    spotlight.style.display = 'block';
+    spotlight.style.left = `${spotLeft}px`;
+    spotlight.style.top = `${spotTop}px`;
+    spotlight.style.width = `${spotWidth}px`;
+    spotlight.style.height = `${spotHeight}px`;
+
+    const cardWidth = Math.min(340, vw - 32);
+    const cardHeight = Math.max(card.offsetHeight || 0, 215);
+    const gap = 14;
+
+    let placement = 'inside-top';
+    if (spotTop + spotHeight + gap + cardHeight <= vh - 20) {
+      placement = 'bottom';
+    } else if (spotTop - gap - cardHeight >= 16) {
+      placement = 'top';
+    } else if (spotLeft + spotWidth + gap + cardWidth <= vw - 16) {
+      placement = 'right';
+    } else if (spotLeft - gap - cardWidth >= 16) {
+      placement = 'left';
+    }
+
+    let cardLeft = 16;
+    let cardTop = 16;
+
+    if (placement === 'bottom') {
+      cardTop = spotTop + spotHeight + gap;
+      cardLeft = Math.round(spotLeft + spotWidth / 2 - cardWidth / 2);
+    } else if (placement === 'top') {
+      cardTop = spotTop - gap - cardHeight;
+      cardLeft = Math.round(spotLeft + spotWidth / 2 - cardWidth / 2);
+    } else if (placement === 'right') {
+      cardLeft = spotLeft + spotWidth + gap;
+      cardTop = Math.round(spotTop + spotHeight / 2 - cardHeight / 2);
+    } else if (placement === 'left') {
+      cardLeft = spotLeft - gap - cardWidth;
+      cardTop = Math.round(spotTop + spotHeight / 2 - cardHeight / 2);
+    } else {
+      cardTop = Math.max(20, spotTop + 16);
+      cardLeft = Math.round(spotLeft + spotWidth / 2 - cardWidth / 2);
+    }
+
+    cardLeft = Math.max(16, Math.min(vw - cardWidth - 16, cardLeft));
+    cardTop = Math.max(16, Math.min(vh - cardHeight - 24, cardTop));
+
+    card.style.left = `${cardLeft}px`;
+    card.style.top = `${cardTop}px`;
+
+    if (arrow) {
+      if (placement === 'inside-top') {
+        arrow.style.display = 'none';
+      } else {
+        arrow.style.display = 'block';
+        arrow.className = `interactive-tour-arrow arrow-${placement}`;
+        arrow.style.top = '';
+        arrow.style.bottom = '';
+        arrow.style.left = '';
+        arrow.style.right = '';
+        if (placement === 'bottom' || placement === 'top') {
+          const arrowX = Math.max(18, Math.min(cardWidth - 28, Math.round(spotLeft + spotWidth / 2 - cardLeft - 7)));
+          arrow.style.left = `${arrowX}px`;
+          if (placement === 'bottom') arrow.style.top = '-7px';
+          if (placement === 'top') arrow.style.bottom = '-7px';
+        } else {
+          const arrowY = Math.max(18, Math.min(cardHeight - 28, Math.round(spotTop + spotHeight / 2 - cardTop - 7)));
+          arrow.style.top = `${arrowY}px`;
+          if (placement === 'right') arrow.style.left = '-7px';
+          if (placement === 'left') arrow.style.right = '-7px';
+        }
+      }
+    }
+  }
+
+  function renderInteractiveTourStep() {
+    if (!activeTourKey) return;
+    const steps = INTERACTIVE_TOUR_FLOWS[activeTourKey] || [];
+    if (!steps.length || activeTourIndex < 0 || activeTourIndex >= steps.length) {
+      skipInteractiveTour();
+      return;
+    }
+
+    const overlay = document.getElementById('interactiveTourOverlay');
+    if (!overlay) return;
+    overlay.style.display = 'block';
+    isGuideModeActive = true;
+
+    const step = steps[activeTourIndex];
+    const targetEl = resolveTourTargetElement(step);
+    if (targetEl && typeof targetEl.scrollIntoView === 'function') {
+      try { targetEl.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' }); } catch (_) {}
+    }
+
+    const stepBadge = document.getElementById('interactiveTourStepBadge');
+    const titleEl = document.getElementById('interactiveTourTitle');
+    const descEl = document.getElementById('interactiveTourDesc');
+    const dotsEl = document.getElementById('interactiveTourDots');
+    const prevBtn = document.getElementById('interactiveTourPrevBtn');
+    const nextBtn = document.getElementById('interactiveTourNextBtn');
+
+    if (stepBadge) stepBadge.textContent = `Step ${activeTourIndex + 1} of ${steps.length}`;
+    if (titleEl) titleEl.textContent = step.title;
+    if (descEl) descEl.textContent = step.desc;
+
+    if (dotsEl) {
+      dotsEl.innerHTML = steps.map((_, idx) =>
+        `<span class="interactive-tour-dot${idx === activeTourIndex ? ' active' : ''}"></span>`
+      ).join('');
+    }
+    if (prevBtn) {
+      prevBtn.style.display = activeTourIndex > 0 ? 'inline-flex' : 'none';
+    }
+    if (nextBtn) {
+      nextBtn.textContent = (activeTourIndex === steps.length - 1) ? 'Got It!' : 'Next';
+    }
+
+    positionInteractiveTourCard(targetEl);
+  }
+
+  function repositionActiveTour() {
+    if (!activeTourKey) return;
+    const steps = INTERACTIVE_TOUR_FLOWS[activeTourKey] || [];
+    const step = steps[activeTourIndex];
+    if (!step) return;
+    positionInteractiveTourCard(resolveTourTargetElement(step));
+  }
+
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('resize', repositionActiveTour);
+    window.addEventListener('keydown', (e) => {
+      if (e && e.key === 'Escape' && activeTourKey) {
+        skipInteractiveTour();
+      }
+    });
+  }
+
+  function startInteractiveTour(flowKey = 'onboarding', force = false) {
+    const steps = INTERACTIVE_TOUR_FLOWS[flowKey];
+    if (!steps || !steps.length) return false;
+    const storageKey = getTourStorageKey(flowKey);
+    let alreadySeen = false;
+    try {
+      alreadySeen = Boolean(localStorage.getItem(storageKey));
+    } catch (_) {}
+    if (!force && (alreadySeen || activeTourKey)) {
+      return false;
+    }
+
+    activeTourKey = flowKey;
+    activeTourIndex = 0;
+    renderInteractiveTourStep();
+    return true;
+  }
+
+  function nextInteractiveTourStep() {
+    if (!activeTourKey) return;
+    const steps = INTERACTIVE_TOUR_FLOWS[activeTourKey] || [];
+    if (activeTourIndex < steps.length - 1) {
+      activeTourIndex += 1;
+      renderInteractiveTourStep();
+    } else {
+      closeInteractiveTour(true);
+    }
+  }
+
+  function prevInteractiveTourStep() {
+    if (!activeTourKey) return;
+    if (activeTourIndex > 0) {
+      activeTourIndex -= 1;
+      renderInteractiveTourStep();
+    }
+  }
+
+  function closeInteractiveTour(markSeen = true) {
+    const closingKey = activeTourKey;
+    activeTourKey = null;
+    activeTourIndex = 0;
+    isGuideModeActive = false;
+    const overlay = document.getElementById('interactiveTourOverlay');
+    if (overlay) overlay.style.display = 'none';
+    if (markSeen && closingKey) {
+      try {
+        localStorage.setItem(getTourStorageKey(closingKey), 'seen');
+        if (closingKey === 'onboarding') {
+          localStorage.setItem('pims_sfe_guide_seen', 'true');
+        }
+      } catch (_) {}
+    }
+  }
+
+  function skipInteractiveTour() {
+    closeInteractiveTour(true);
+  }
 
   function checkFirstTimeUserGuide() {
-    const hasSeenGuide = localStorage.getItem('pims_sfe_guide_seen');
-    if (!hasSeenGuide) {
-      setTimeout(() => {
-        openUserGuideModal(false);
-      }, 500);
-    }
-    const guideBtn = document.getElementById('btnHelpGuide');
-    if (guideBtn) guideBtn.style.display = 'inline-flex';
+    setTimeout(() => {
+      startInteractiveTour('onboarding', false);
+    }, 450);
   }
 
   function openUserGuideModal(isRecap) {
-    const modal = document.getElementById('userGuideModalOverlay');
-    if (!modal) return;
-    modal.classList.add('active');
+    startInteractiveTour('onboarding', Boolean(isRecap));
   }
 
   function closeUserGuideModal() {
-    const modal = document.getElementById('userGuideModalOverlay');
-    if (modal) modal.classList.remove('active');
-    localStorage.setItem('pims_sfe_guide_seen', 'true');
+    skipInteractiveTour();
   }
 
   function toggleGuideSubtextPref(enable) {
@@ -2843,6 +3162,28 @@
     background: #64748B;
   }
 
+  .reset-pwd-hover-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 11px;
+    border-radius: 6px;
+    border: 1px solid #BFDBFE;
+    background: #EFF6FF;
+    color: #0066FF;
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .reset-pwd-hover-btn:hover {
+    background: #0066FF;
+    border-color: #0066FF;
+    color: #FFFFFF;
+    box-shadow: 0 4px 10px rgba(0, 102, 255, 0.22);
+  }
+
 </style>
 </head>
 <body>
@@ -2877,12 +3218,6 @@
 
     <!-- Theme permanently locked to Enterprise Light Mode per SFE standard -->
     <!-- Refresh Live Sync removed per SFE live reconfig standard -->
-
-
-
-    <div id="headerAuthStatus" style="font-size:11.5px; color:#94A3B8; font-weight:700; display:flex; align-items:center; gap:6px;">
-      <span>🔒 Secure Login</span>
-    </div>
   </div>
 </header>
 
@@ -2933,35 +3268,27 @@
               <input type="checkbox" id="loginRememberMe">
               <span>Remember username</span>
             </label>
+            <a id="forgotPasswordLink" class="reset-pwd-hover-btn" href="javascript:void(0)" onclick="openResetPasswordModal()" style="display:none;">
+              Reset Password
+            </a>
           </div>
 
           <button type="submit" id="loginSubmitBtn" class="btn btn-primary" style="width:100%; padding:11px; font-size:13px; font-weight:700; border-radius:6px; display:flex; justify-content:center; align-items:center; gap:8px;">
             <span id="loginBtnText">Login to Reconfiguration Portal</span>
           </button>
-
-          <div style="text-align:center; margin-top:14px;">
-            <a href="javascript:void(0)" onclick="openResetPasswordModal()" style="font-size:11.5px; color:#0066FF; font-weight:700; text-decoration:none;">
-              Forgot Password?
-            </a>
-          </div>
         </form>
 
       </div>
     </div>
   </div>
 
-  <!-- ERPNext Password Reset Modal Overlay (Auto-triggered upon 5 failed attempts or manual click) -->
+  <!-- ERPNext Password Reset Modal Overlay (Auto-triggered upon 6 failed attempts) -->
   <div id="resetPasswordModalOverlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(15, 23, 42, 0.78); backdrop-filter:blur(6px); z-index:999999; justify-content:center; align-items:center; padding:16px;">
     <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:12px; box-shadow:0 25px 50px -12px rgba(0, 0, 0, 0.35); width:100%; max-width:440px; overflow:hidden; animation:modalPopIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);">
-      <!-- Header with Cyber-Grade Security Shield -->
+      <!-- Header -->
       <div style="background:linear-gradient(135deg, #0F172A 0%, #1E293B 100%); padding:20px 24px; border-bottom:1px solid #334155; display:flex; align-items:center; justify-content:space-between;">
-        <div style="display:flex; align-items:center; gap:12px;">
-          <div style="width:36px; height:36px; border-radius:8px; background:rgba(239, 68, 68, 0.15); border:1px solid rgba(239, 68, 68, 0.3); display:flex; align-items:center; justify-content:center; color:#EF4444; font-size:18px;">
-            🔒
-          </div>
-          <div>
-            <h3 style="margin:0; font-size:15px; font-weight:700; color:#F8FAFC;">Forgot Password</h3>
-          </div>
+        <div>
+          <h3 style="margin:0; font-size:15px; font-weight:700; color:#F8FAFC;">Reset Password</h3>
         </div>
         <button type="button" onclick="closeResetPasswordModal()" style="background:transparent; border:none; color:#94A3B8; font-size:18px; cursor:pointer; padding:4px;">✕</button>
       </div>
@@ -2971,15 +3298,15 @@
         <form id="resetPasswordForm" onsubmit="handleResetPasswordSubmit(event); return false;">
           <div class="form-group" style="margin-bottom:16px;">
             <label style="display:block; font-size:11px; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:6px;">
-              Username
+              Email Address / Username
             </label>
-            <input type="text" id="resetUserEmail" class="form-control" placeholder="Enter your username" required style="background:#F8FAFC; border:1.5px solid #CBD5E1; color:#0F172A; font-size:13px; font-weight:600; padding:10px 12px; border-radius:6px; width:100%;">
+            <input type="text" id="resetUserEmail" class="form-control" placeholder="Locked to the account with 6 failed attempts" readonly required style="background:#F1F5F9; border:1.5px solid #CBD5E1; color:#475569; font-size:13px; font-weight:600; padding:10px 12px; border-radius:6px; width:100%; cursor:not-allowed;">
           </div>
 
           <div id="resetPasswordFeedback" style="display:none; padding:10px 12px; border-radius:6px; font-size:12px; margin-bottom:16px; font-weight:600; line-height:1.4;"></div>
 
           <button type="submit" id="btnSubmitResetPassword" class="btn btn-primary" style="width:100%; padding:11px; font-size:13px; font-weight:700; border-radius:6px; display:flex; justify-content:center; align-items:center; gap:8px;">
-            <span id="resetBtnText">Submit Password Reset Request</span>
+            <span id="resetBtnText">Send Password Reset Link</span>
           </button>
 
           <div style="text-align:center; margin-top:14px;">
@@ -3006,19 +3333,15 @@
       <div class="sidebar-menu">
         <button class="sidebar-tab-btn active" id="btn-tab-editor" onclick="openTab('tab-editor')">
           <span>Reconfiguration Editor</span>
-          <span class="tab-badge" id="editorBadge">0 Territories</span>
         </button>
         <button class="sidebar-tab-btn" id="btn-tab-realignment" onclick="openTab('tab-realignment')">
           <span>Realignment Overview &amp; Archive Territory</span>
-          <span class="tab-badge" id="archiveBadge">Clusters</span>
         </button>
         <button class="sidebar-tab-btn" id="btn-tab-summary" onclick="openTab('tab-summary')">
           <span>Summary Report</span>
-          <span class="tab-badge" id="summaryBadge">Audit Trail</span>
         </button>
         <button class="sidebar-tab-btn" id="btn-tab-institutions" onclick="openTab('tab-institutions')">
           <span>Institution Approvals</span>
-          <span class="tab-badge" id="instApprovalBadge" style="background:rgba(245,158,11,0.2); color:#FCD34D; border:1px solid rgba(245,158,11,0.4);">0 Pending</span>
         </button>
       </div>
     </div>
@@ -3032,13 +3355,8 @@
         </div>
       </div>
 
-      <!-- Quick Actions: User Guide & Logout -->
+      <!-- Quick Action: Logout -->
       <div style="display:flex; gap:6px; align-items:center; width:100%; box-sizing:border-box;">
-        <button class="btn btn-sm btn-outline" id="btnHelpGuide" onclick="openUserGuideModal(true)" style="display:none; flex:1; align-items:center; justify-content:center; gap:6px; background:#0F172A; border:1px solid #334155; color:#38BDF8; font-weight:700; border-radius:6px; height:32px; padding:0 8px; cursor:pointer; font-size:11.5px;" title="User Guide & Navigation Hints (ℹ)">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-          <span>User Guide</span>
-        </button>
-
         <button class="btn btn-sm btn-logout" id="btnLogout" onclick="logoutPortal()" style="display:none; flex:1; align-items:center; justify-content:center; gap:6px; background:rgba(239, 68, 68, 0.15); border:1px solid rgba(239, 68, 68, 0.35); color:#FCA5A5; font-weight:700; border-radius:6px; height:32px; padding:0 8px; cursor:pointer; font-size:11.5px;" title="Sign out of Territory Portal">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
           <span>Logout</span>
@@ -3313,7 +3631,7 @@
 
         <!-- VIEW B: Territory Tree Format (Default View matching ERPNext, Zero Pagination Overlap) -->
         <div id="territoryTreeView" style="display:block;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+          <div id="territoryTreeToolbar" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
             <div style="display:flex; align-items:center; gap:10px;">
               <h2 style="font-size:16px; font-weight:800; color:#0F172A; margin:0; display:flex; align-items:center; gap:8px;">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0066FF" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
@@ -5620,6 +5938,30 @@ const BASELINE_ERP_TERRITORIES = [
     return null;
   }
 
+  function getSelectedProgramName() {
+    const progSelect = (typeof document !== 'undefined') ? document.getElementById('programSelect') : null;
+    if (progSelect && progSelect.value) {
+      return progSelect.value;
+    }
+    return (typeof activeProgram !== 'undefined' && activeProgram) ? activeProgram : 'Abbott Diabetes Care';
+  }
+
+  function findRosterProgram(spName) {
+    if (!spName || typeof PROGRAM_SALES_PERSON_ROSTER !== 'object' || !PROGRAM_SALES_PERSON_ROSTER) return null;
+    const lowerName = spName.trim().toLowerCase();
+    const cleanLookupName = spName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+    for (const [progKey, roster] of Object.entries(PROGRAM_SALES_PERSON_ROSTER)) {
+      for (const item of roster) {
+        const rawItemName = (item.sales_person_name || item.name || '').trim();
+        const itemClean = rawItemName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+        if (rawItemName.toLowerCase() === lowerName || (cleanLookupName && itemClean === cleanLookupName)) {
+          return progKey;
+        }
+      }
+    }
+    return null;
+  }
+
   function detectSalesPersonProgram(spOrName) {
     if (!spOrName) return null;
     const spName = typeof spOrName === 'string'
@@ -5630,15 +5972,8 @@ const BASELINE_ERP_TERRITORIES = [
     const spMap = getSalesPersonProgramMap();
     if (spMap[spName]) return spMap[spName];
 
-    const cleanLookupName = spName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
-    for (const [progKey, roster] of Object.entries(PROGRAM_SALES_PERSON_ROSTER || {})) {
-      for (const item of roster) {
-        const itemClean = (item.sales_person_name || item.name).replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
-        if (item.name.toLowerCase() === spName.toLowerCase() || itemClean === cleanLookupName) {
-          return progKey;
-        }
-      }
-    }
+    const rosterProg = findRosterProgram(spName);
+    if (rosterProg) return rosterProg;
 
     const spList = (typeof availableSalesPersons !== 'undefined' && Array.isArray(availableSalesPersons))
       ? availableSalesPersons
@@ -5661,7 +5996,9 @@ const BASELINE_ERP_TERRITORIES = [
     while (currName && currName !== 'Sales Team' && !visited.has(currName)) {
       visited.add(currName);
       if (spMap[currName]) return spMap[currName];
-      const node = lookup[currName];
+      const currRosterProg = findRosterProgram(currName);
+      if (currRosterProg) return currRosterProg;
+      const node = lookup[currName] || (currName === spName ? spObj : null);
       if (node) {
         const nodeExplicit = normalizeProgramName(node.program || node.custom_account_or_program || '');
         if (nodeExplicit) return nodeExplicit;
@@ -5721,7 +6058,7 @@ const BASELINE_ERP_TERRITORIES = [
   }
 
   function isSalesPersonInProgram(spOrName, programName, allowRootSalesTeam = false) {
-    const targetProg = programName || activeProgram || 'Abbott Diabetes Care';
+    const targetProg = programName || getSelectedProgramName();
     const spName = typeof spOrName === 'string'
       ? spOrName.trim()
       : String((spOrName && (spOrName.sales_person_name || spOrName.name)) || '').trim();
@@ -5734,7 +6071,7 @@ const BASELINE_ERP_TERRITORIES = [
     if (detected) {
       return detected === targetProg;
     }
-    return true;
+    return false;
   }
 
   function isEmployeeInProgram(emp, programName) {
@@ -5845,6 +6182,12 @@ const BASELINE_ERP_TERRITORIES = [
     }
     const titleEl = document.getElementById('activeProgTitle');
     if (titleEl) titleEl.innerText = activeProgram;
+
+    const newSpParentVal = (document.getElementById('newSpParentInput') || {}).value;
+    if (newSpParentVal && !isSalesPersonInProgram(newSpParentVal, activeProgram, false) && typeof clearErpSelection === 'function') {
+      clearErpSelection('newSpParent');
+    }
+    populateParentSalesPersonSelect();
 
     const progData = LIVE_DATA[activeProgram] || { territories: [], accounts: [] };
     const baseMap = new Map();
@@ -6085,36 +6428,144 @@ const BASELINE_ERP_TERRITORIES = [
   let isActivelyLoggingIn = false;
   let lastProcessedResetTs = 0;
 
-  // Security Intrusion Sentinel for Authentication Guarding (5 Attempts Max & Anti-Injection)
+  function updateResetPasswordButtonVisibility(show) {
+    const resetBtn = document.getElementById('forgotPasswordLink');
+    if (resetBtn) {
+      resetBtn.style.display = show ? 'inline-flex' : 'none';
+    }
+  }
+  window.updateResetPasswordButtonVisibility = updateResetPasswordButtonVisibility;
+
+  function formatCooldownMMSS(totalSeconds) {
+    const sec = Math.max(0, Math.ceil(Number(totalSeconds) || 0));
+    const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+    const ss = String(sec % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
+  }
+
+  function formatCooldownMessage(totalSeconds) {
+    return `Maximum ${SecurityIntrusionGuard.MAX_ATTEMPTS} login attempts reached. Cooldown remaining: ${formatCooldownMMSS(totalSeconds)} before you can enter your credentials again.`;
+  }
+
+  // Security Intrusion Sentinel for Authentication Guarding (6 Attempts Max & 5-Min Cooldown)
   const SecurityIntrusionGuard = {
-    MAX_ATTEMPTS: 5,
+    MAX_ATTEMPTS: 6,
+    COOLDOWN_SECONDS: 5 * 60,
     failedAttempts: 0,
     lockoutUntil: 0,
+    lockedUsername: '',
+    cooldownTimerId: null,
 
     getFailedAttempts() {
       try {
         const val = parseInt(sessionStorage.getItem('sfe_failed_attempts'), 10);
-        return isNaN(val) ? 0 : val;
+        return isNaN(val) ? this.failedAttempts : val;
       } catch (_) {
         return this.failedAttempts;
       }
     },
 
-    isLockedOut() {
-      const savedLockout = localStorage.getItem('sfe_security_lockout');
-      if (savedLockout) {
-        const val = parseInt(savedLockout, 10);
-        if (!isNaN(val) && val > Date.now()) {
-          this.lockoutUntil = val;
-        } else {
-          localStorage.removeItem('sfe_security_lockout');
-          this.lockoutUntil = 0;
+    getLockedUsername() {
+      if (this.lockedUsername) return this.lockedUsername;
+      try {
+        return localStorage.getItem('sfe_locked_username') || '';
+      } catch (_) {
+        return '';
+      }
+    },
+
+    setLoginInputsLocked(locked) {
+      const isLocked = Boolean(locked);
+      const usrEl = document.getElementById('loginUsername');
+      const pwdEl = document.getElementById('loginPassword');
+      const btnEl = document.getElementById('loginSubmitBtn');
+      [usrEl, pwdEl, btnEl].forEach(el => {
+        if (!el) return;
+        el.disabled = isLocked;
+        if (el.style) {
+          el.style.opacity = isLocked ? '0.6' : '1';
+          el.style.cursor = isLocked ? 'not-allowed' : (el === btnEl ? 'pointer' : '');
         }
+      });
+    },
+
+    startCooldownCountdown(durationSeconds, username = '') {
+      if (this.cooldownTimerId) {
+        clearInterval(this.cooldownTimerId);
+        this.cooldownTimerId = null;
       }
+      const secTotal = Math.max(1, Math.ceil(Number(durationSeconds) || this.COOLDOWN_SECONDS));
+      this.lockoutUntil = Date.now() + secTotal * 1000;
+      const targetUser = (username || this.getLockedUsername() || ((document.getElementById('loginUsername') || {}).value || '')).trim();
+      if (targetUser) {
+        this.lockedUsername = targetUser;
+        try { localStorage.setItem('sfe_locked_username', targetUser); } catch (_) {}
+      }
+      try { localStorage.setItem('sfe_security_lockout', String(this.lockoutUntil)); } catch (_) {}
+
+      this.setLoginInputsLocked(true);
+      updateResetPasswordButtonVisibility(true);
+
+      const renderTick = () => {
+        const remSec = Math.max(0, Math.ceil((this.lockoutUntil - Date.now()) / 1000));
+        if (remSec <= 0) {
+          if (this.cooldownTimerId) {
+            clearInterval(this.cooldownTimerId);
+            this.cooldownTimerId = null;
+          }
+          this.reset();
+          const errBox = document.getElementById('loginErrorBox');
+          if (errBox) {
+            errBox.style.display = 'none';
+            errBox.textContent = '';
+          }
+          return;
+        }
+        const msg = formatCooldownMessage(remSec);
+        if (typeof showLoginError === 'function') {
+          showLoginError(msg);
+        } else {
+          const errBox = document.getElementById('loginErrorBox');
+          if (errBox) {
+            errBox.textContent = msg;
+            errBox.style.display = 'block';
+          }
+        }
+      };
+
+      renderTick();
+      this.cooldownTimerId = setInterval(renderTick, 1000);
+    },
+
+    isLockedOut() {
+      try {
+        const savedLockout = localStorage.getItem('sfe_security_lockout');
+        if (savedLockout) {
+          const val = parseInt(savedLockout, 10);
+          if (!isNaN(val) && val > Date.now()) {
+            this.lockoutUntil = val;
+          } else {
+            localStorage.removeItem('sfe_security_lockout');
+            localStorage.removeItem('sfe_locked_username');
+            this.lockoutUntil = 0;
+            this.lockedUsername = '';
+            this.failedAttempts = 0;
+            try { sessionStorage.removeItem('sfe_failed_attempts'); } catch (_) {}
+          }
+        }
+      } catch (_) {}
       if (this.lockoutUntil > Date.now()) {
-        const remainingMinutes = Math.ceil((this.lockoutUntil - Date.now()) / 60000);
-        return `🔒 Security Access Frozen: Maximum login attempts exceeded. Access locked for ${remainingMinutes} minute(s). Please wait before trying again.`;
+        const remSec = Math.max(1, Math.ceil((this.lockoutUntil - Date.now()) / 1000));
+        if (!this.cooldownTimerId) {
+          this.startCooldownCountdown(remSec, this.getLockedUsername());
+        } else {
+          this.setLoginInputsLocked(true);
+          updateResetPasswordButtonVisibility(true);
+        }
+        return formatCooldownMessage(remSec);
       }
+      this.setLoginInputsLocked(false);
+      updateResetPasswordButtonVisibility(this.getFailedAttempts() >= this.MAX_ATTEMPTS);
       return false;
     },
 
@@ -6137,44 +6588,66 @@ const BASELINE_ERP_TERRITORIES = [
       return false;
     },
 
-    recordFailedAttempt(isViolation = false) {
-      let current = this.getFailedAttempts() + 1;
+    recordFailedAttempt(isViolation = false, explicitCount = null, lockoutSeconds = null, username = '') {
+      const prev = this.getFailedAttempts();
+      const nextLocal = (prev >= this.MAX_ATTEMPTS ? 0 : prev) + 1;
+      const current = (typeof explicitCount === 'number' && !isNaN(explicitCount) && explicitCount > 0)
+        ? Math.max(nextLocal, explicitCount)
+        : nextLocal;
       this.failedAttempts = current;
       try { sessionStorage.setItem('sfe_failed_attempts', String(current)); } catch (_) {}
 
-      if (current >= this.MAX_ATTEMPTS) {
-        this.lockoutUntil = Date.now() + 15 * 60 * 1000; // 15 min lock
-        try { localStorage.setItem('sfe_security_lockout', String(this.lockoutUntil)); } catch (_) {}
-        setTimeout(() => openResetPasswordModal(), 200);
+      const reachedMax = current >= this.MAX_ATTEMPTS;
+      updateResetPasswordButtonVisibility(reachedMax);
+      if (reachedMax) {
+        const secs = (typeof lockoutSeconds === 'number' && lockoutSeconds > 0) ? lockoutSeconds : this.COOLDOWN_SECONDS;
+        const targetUser = (username || ((document.getElementById('loginUsername') || {}).value || '')).trim();
+        this.startCooldownCountdown(secs, targetUser);
+        setTimeout(() => openResetPasswordModal(targetUser), 200);
       }
       return current;
     },
 
     reset() {
+      if (this.cooldownTimerId) {
+        clearInterval(this.cooldownTimerId);
+        this.cooldownTimerId = null;
+      }
       this.failedAttempts = 0;
       this.lockoutUntil = 0;
+      this.lockedUsername = '';
+      this.setLoginInputsLocked(false);
+      updateResetPasswordButtonVisibility(false);
       try {
         sessionStorage.removeItem('sfe_failed_attempts');
         localStorage.removeItem('sfe_security_lockout');
+        localStorage.removeItem('sfe_locked_username');
       } catch (_) {}
     }
   };
 
   // --- ERPNext PASSWORD RESET MODAL CONTROLLER ---
   function openResetPasswordModal(prefillEmail = '') {
+    const canReset = SecurityIntrusionGuard.getFailedAttempts() >= SecurityIntrusionGuard.MAX_ATTEMPTS ||
+      Boolean(SecurityIntrusionGuard.isLockedOut());
+    if (!canReset) {
+      updateResetPasswordButtonVisibility(false);
+      return;
+    }
     const modal = document.getElementById('resetPasswordModalOverlay');
     if (!modal) return;
     const emailInput = document.getElementById('resetUserEmail');
     const loginUserInput = document.getElementById('loginUsername');
     if (emailInput) {
-      emailInput.value = prefillEmail || (loginUserInput ? loginUserInput.value.trim() : '');
+      emailInput.value = SecurityIntrusionGuard.getLockedUsername() || prefillEmail || (loginUserInput ? loginUserInput.value.trim() : '');
+      emailInput.readOnly = true;
     }
     const feedback = document.getElementById('resetPasswordFeedback');
     if (feedback) feedback.style.display = 'none';
     const btn = document.getElementById('btnSubmitResetPassword');
     const btnText = document.getElementById('resetBtnText');
     if (btn) btn.disabled = false;
-    if (btnText) btnText.innerHTML = 'Submit Password Reset Request';
+    if (btnText) btnText.innerHTML = 'Send Password Reset Link';
     modal.style.display = 'flex';
   }
   window.openResetPasswordModal = openResetPasswordModal;
@@ -6199,7 +6672,7 @@ const BASELINE_ERP_TERRITORIES = [
         feedback.style.background = '#FEE2E2';
         feedback.style.border = '1px solid #FCA5A5';
         feedback.style.color = '#991B1B';
-        feedback.innerHTML = '⚠️ Please enter your username.';
+        feedback.textContent = 'Please enter your email address or username.';
       }
       return;
     }
@@ -6210,13 +6683,13 @@ const BASELINE_ERP_TERRITORIES = [
         feedback.style.background = '#FEE2E2';
         feedback.style.border = '1px solid #FCA5A5';
         feedback.style.color = '#991B1B';
-        feedback.innerHTML = '⚠️ SECURITY VIOLATION: Suspicious characters or command injection pattern detected. Request blocked.';
+        feedback.textContent = 'SECURITY VIOLATION: Suspicious characters or command injection pattern detected. Request blocked.';
       }
       return;
     }
 
     if (btn) btn.disabled = true;
-    if (btnText) btnText.innerHTML = 'Submitting Request...';
+    if (btnText) btnText.innerHTML = 'Sending Reset Link...';
     if (feedback) feedback.style.display = 'none';
 
     // 1. If running in Streamlit component iframe
@@ -6235,7 +6708,7 @@ const BASELINE_ERP_TERRITORIES = [
       setTimeout(() => {
         if (btn && btn.disabled) {
           btn.disabled = false;
-          if (btnText) btnText.innerHTML = 'Submit Password Reset Request';
+          if (btnText) btnText.innerHTML = 'Send Password Reset Link';
         }
       }, 15000);
       return;
@@ -6254,7 +6727,7 @@ const BASELINE_ERP_TERRITORIES = [
       handleResetPasswordResponse({ success: false, message: 'Could not communicate with authentication server. Please verify network connectivity.' });
     } finally {
       if (btn) btn.disabled = false;
-      if (btnText) btnText.innerHTML = 'Submit Password Reset Request';
+      if (btnText) btnText.innerHTML = 'Send Password Reset Link';
     }
   }
   window.handleResetPasswordSubmit = handleResetPasswordSubmit;
@@ -6266,19 +6739,26 @@ const BASELINE_ERP_TERRITORIES = [
     if (!feedback) return;
 
     feedback.style.display = 'block';
+    const cleanMsg = stripLoginAlertDecorations(resp && resp.message ? resp.message : '');
     if (resp && resp.success) {
       feedback.style.background = '#ECFDF5';
       feedback.style.border = '1px solid #6EE7B7';
       feedback.style.color = '#065F46';
-      feedback.innerHTML = `✅ ${escapeHtml(resp.message || 'Password reset request received. Please check your registered email or contact your ERPNext System Administrator.')}`;
+      feedback.textContent = cleanMsg || 'Password reset link has been sent to your registered email inbox.';
       if (btn) btn.disabled = true;
-      if (btnText) btnText.innerHTML = 'Request Submitted';
-      showToast('Password reset request submitted successfully.', 'success');
+      if (btnText) btnText.innerHTML = 'Reset Link Sent';
+      SecurityIntrusionGuard.reset();
+      const errBox = document.getElementById('loginErrorBox');
+      if (errBox) {
+        errBox.style.display = 'none';
+        errBox.textContent = '';
+      }
+      showToast('Password reset link sent successfully.', 'success');
     } else {
       feedback.style.background = '#FEE2E2';
       feedback.style.border = '1px solid #FCA5A5';
       feedback.style.color = '#991B1B';
-      feedback.innerHTML = `⚠️ ${escapeHtml(resp && resp.message ? resp.message : 'Failed to submit password reset request. Please verify username/email.')}`;
+      feedback.textContent = cleanMsg || 'Failed to send password reset link. Please verify your email address or username.';
       if (btn) btn.disabled = false;
       if (btnText) btnText.innerHTML = 'Retry Password Reset';
     }
@@ -6481,10 +6961,6 @@ const BASELINE_ERP_TERRITORIES = [
     if (userBadge) userBadge.style.display = 'flex';
     const logoutBtn = document.getElementById('btnLogout');
     if (logoutBtn) logoutBtn.style.display = 'inline-flex';
-    const helpBtn = document.getElementById('btnHelpGuide');
-    if (helpBtn) helpBtn.style.display = 'inline-flex';
-    const authStatus = document.getElementById('headerAuthStatus');
-    if (authStatus) authStatus.style.display = 'none';
 
     // Update user badge text
     const badgeTextEl = document.getElementById('userBadgeText');
@@ -6508,6 +6984,7 @@ const BASELINE_ERP_TERRITORIES = [
   function showLoginView() {
     loginNotificationShown = false;
     initialPortalLoaded = false;
+    if (typeof closeInteractiveTour === 'function') closeInteractiveTour(false);
     hideActiveUserSessionNotification();
     authenticatedUser = null;
     localStorage.removeItem('sfe_portal_user');
@@ -6517,6 +6994,13 @@ const BASELINE_ERP_TERRITORIES = [
     // Show login screen
     const loginView = document.getElementById('loginView');
     if (loginView) loginView.style.display = 'flex';
+    const lockMsg = SecurityIntrusionGuard.isLockedOut();
+    const shouldShowReset = Boolean(lockMsg) ||
+      SecurityIntrusionGuard.getFailedAttempts() >= SecurityIntrusionGuard.MAX_ATTEMPTS;
+    updateResetPasswordButtonVisibility(shouldShowReset);
+    if (lockMsg) {
+      showLoginError(lockMsg);
+    }
 
     // Hide entire authenticated portal layout
     const portalLayout = document.getElementById('portalAppLayout');
@@ -6533,16 +7017,12 @@ const BASELINE_ERP_TERRITORIES = [
     if (toggleBtn) toggleBtn.style.display = 'none';
     const progGroup = document.getElementById('headerProgramGroup');
     if (progGroup) progGroup.style.display = 'none';
-    const helpBtn = document.getElementById('btnHelpGuide');
-    if (helpBtn) helpBtn.style.display = 'none';
     const syncBtn = document.getElementById('headerSyncBtn');
     if (syncBtn) syncBtn.style.display = 'none';
     const userBadge = document.getElementById('userBadge');
     if (userBadge) userBadge.style.display = 'none';
     const logoutBtn = document.getElementById('btnLogout');
     if (logoutBtn) logoutBtn.style.display = 'none';
-    const authStatus = document.getElementById('headerAuthStatus');
-    if (authStatus) authStatus.style.display = 'flex';
 
     // Reset login form & clear password
     const pwdInput = document.getElementById('loginPassword');
@@ -6597,17 +7077,76 @@ const BASELINE_ERP_TERRITORIES = [
 
   let streamlitLoginWatchdog = null;
 
+  function getProgramScopedSalesPersonPool(programName) {
+    const targetProg = programName || getSelectedProgramName();
+    const spPool = [];
+    const seenNames = new Set(['sales team']);
+
+    if (typeof availableSalesPersons !== 'undefined' && Array.isArray(availableSalesPersons)) {
+      availableSalesPersons.forEach(s => {
+        const sName = (s && (s.sales_person_name || s.name)) ? String(s.sales_person_name || s.name).trim() : '';
+        if (!sName || seenNames.has(sName.toLowerCase())) return;
+        if (s.enabled === 0 || s.enabled === false) return;
+        if (!isSalesPersonInProgram(s, targetProg, false)) return;
+        seenNames.add(sName.toLowerCase());
+        spPool.push(s);
+      });
+    }
+
+    // Include baseline program roster entries not yet in availableSalesPersons
+    const progRoster = (typeof PROGRAM_SALES_PERSON_ROSTER === 'object' && PROGRAM_SALES_PERSON_ROSTER && PROGRAM_SALES_PERSON_ROSTER[targetProg]) || [];
+    progRoster.forEach(s => {
+      const sName = (s && (s.sales_person_name || s.name)) ? String(s.sales_person_name || s.name).trim() : '';
+      if (!sName || seenNames.has(sName.toLowerCase())) return;
+      if (s.enabled === 0 || s.enabled === false) return;
+      seenNames.add(sName.toLowerCase());
+      spPool.push(s);
+    });
+
+    // Include program-specific MedReps from active programTerritories or LIVE_DATA[targetProg]
+    const terrSources = [];
+    if (typeof programTerritories !== 'undefined' && Array.isArray(programTerritories) && targetProg === activeProgram) {
+      const allowedTerrs = getProgramTerritoryNames(targetProg);
+      programTerritories.forEach(pt => {
+        const code = pt && (pt.activeCode || pt.histCode || pt.latestPrevCode);
+        if (!code || allowedTerrs.has(code)) terrSources.push(pt);
+      });
+    }
+    const baseTerrs = (typeof LIVE_DATA === 'object' && LIVE_DATA && LIVE_DATA[targetProg] && Array.isArray(LIVE_DATA[targetProg].territories))
+      ? LIVE_DATA[targetProg].territories
+      : [];
+    baseTerrs.forEach(bt => terrSources.push(bt));
+
+    terrSources.forEach(pt => {
+      const rawRep = (typeof cleanRepDisplayName === 'function')
+        ? cleanRepDisplayName(pt && pt.rep)
+        : String((pt && pt.rep) || '').trim();
+      const lowerRep = rawRep.toLowerCase();
+      if (!rawRep || lowerRep.includes('unassigned') || lowerRep.includes('vacant') || lowerRep.includes('folder')) return;
+      if (seenNames.has(lowerRep)) return;
+      seenNames.add(lowerRep);
+      spPool.push({
+        name: rawRep,
+        sales_person_name: rawRep,
+        parent_sales_person: targetProg,
+        is_group: 0,
+        enabled: 1,
+        program: targetProg
+      });
+    });
+
+    return spPool;
+  }
+
   function populateParentSalesPersonSelect() {
     const select = document.getElementById('newSpParentSelect');
-    if (select && Array.isArray(availableSalesPersons)) {
+    if (select) {
+      const currentProg = getSelectedProgramName();
+      const pool = getProgramScopedSalesPersonPool(currentProg);
       select.innerHTML = '';
-      const defOpt = document.createElement('option');
-      defOpt.value = 'Sales Team';
-      defOpt.textContent = 'Sales Team';
-      select.appendChild(defOpt);
-      availableSalesPersons.forEach(sp => {
+      pool.forEach(sp => {
         const name = typeof sp === 'string' ? sp : (sp.sales_person_name || sp.name);
-        if (name && name !== 'Sales Team' && isSalesPersonInProgram(sp, activeProgram, false)) {
+        if (name && name.toLowerCase() !== 'sales team') {
           const opt = document.createElement('option');
           opt.value = name;
           opt.textContent = name;
@@ -6690,15 +7229,28 @@ const BASELINE_ERP_TERRITORIES = [
             if (pwdInput) pwdInput.value = '';
             authenticatedUser = null;
             sessionStorage.removeItem('sfe_portal_user');
-            const attempts = SecurityIntrusionGuard.recordFailedAttempt();
+            const explicitCount = (typeof auth.failed_attempts === 'number')
+              ? auth.failed_attempts
+              : (typeof auth.remaining_attempts === 'number'
+                ? Math.max(0, SecurityIntrusionGuard.MAX_ATTEMPTS - auth.remaining_attempts)
+                : null);
+            const targetUser = (auth.locked_user || ((document.getElementById('loginUsername') || {}).value || '')).trim();
+            const lockoutSecs = (typeof auth.lockout_remaining_seconds === 'number' && auth.lockout_remaining_seconds > 0)
+              ? auth.lockout_remaining_seconds
+              : null;
+            const attempts = SecurityIntrusionGuard.recordFailedAttempt(false, explicitCount, lockoutSecs, targetUser);
             showLoginView();
             if (attempts >= SecurityIntrusionGuard.MAX_ATTEMPTS) {
-              showLoginError('🔒 Maximum 5 login attempts reached. Login locked for security. Please reset your ERPNext password.');
-              openResetPasswordModal();
+              updateResetPasswordButtonVisibility(true);
+              const lockText = formatCooldownMessage(lockoutSecs || SecurityIntrusionGuard.COOLDOWN_SECONDS);
+              showLoginError(lockText);
+              showToast(lockText, 'error');
+              openResetPasswordModal(targetUser);
             } else {
-              showLoginError(`⚠️ ${auth.message} (Attempt ${attempts} of 5)`);
+              const formattedMsg = formatLoginAttemptError(auth.message, attempts);
+              showLoginError(formattedMsg);
+              showToast(formattedMsg, 'error');
             }
-            showToast(auth.message, 'error');
           }
         }
 
@@ -6870,11 +7422,12 @@ const BASELINE_ERP_TERRITORIES = [
     }
 
     if (SecurityIntrusionGuard.detectInjection(usr)) {
-      const attempts = SecurityIntrusionGuard.recordFailedAttempt(true);
+      const attempts = SecurityIntrusionGuard.recordFailedAttempt(true, null, null, usr);
       if (usrInput) usrInput.value = '';
       if (pwdInput) pwdInput.value = '';
-      showLoginError('⚠️ SECURITY VIOLATION: Malicious injection pattern detected. Access blocked and session restricted to safeguard system integrity.');
+      showLoginError('SECURITY VIOLATION: Malicious injection pattern detected. Access blocked and session restricted to safeguard system integrity.');
       if (attempts >= SecurityIntrusionGuard.MAX_ATTEMPTS) {
+        updateResetPasswordButtonVisibility(true);
         openResetPasswordModal(usr);
       }
       return;
@@ -6901,6 +7454,7 @@ const BASELINE_ERP_TERRITORIES = [
             action: "login",
             usr: usr,
             pwd: pwd,
+            failed_attempts: SecurityIntrusionGuard.getFailedAttempts(),
             timestamp: Date.now()
           }
         }, "*");
@@ -6918,12 +7472,13 @@ const BASELINE_ERP_TERRITORIES = [
           authenticatedUser = null;
           sessionStorage.removeItem('sfe_portal_user');
           isActivelyLoggingIn = false;
-          const attempts = SecurityIntrusionGuard.recordFailedAttempt();
+          const attempts = SecurityIntrusionGuard.recordFailedAttempt(false, null, null, usr);
           if (attempts >= SecurityIntrusionGuard.MAX_ATTEMPTS) {
-            showLoginError('🔒 Maximum 5 login attempts reached. Access locked for security. Please reset your ERPNext password.');
+            updateResetPasswordButtonVisibility(true);
+            showLoginError(formatCooldownMessage(SecurityIntrusionGuard.COOLDOWN_SECONDS));
             openResetPasswordModal(usr);
           } else {
-            showLoginError(`Authentication response timed out (15s). Please verify your network connection and credentials. (Attempt ${attempts} of 5)`);
+            showLoginError(formatLoginAttemptError('Authentication response timed out (15s). Please verify your network connection and credentials.', attempts));
           }
         }
       }, 35000);
@@ -6968,15 +7523,24 @@ const BASELINE_ERP_TERRITORIES = [
       sessionStorage.removeItem('sfe_portal_user');
       isActivelyLoggingIn = false;
 
-      const attempts = SecurityIntrusionGuard.recordFailedAttempt();
+      const explicitCount = (data && typeof data.failed_attempts === 'number')
+        ? data.failed_attempts
+        : ((data && typeof data.remaining_attempts === 'number')
+          ? Math.max(0, SecurityIntrusionGuard.MAX_ATTEMPTS - data.remaining_attempts)
+          : null);
+      const lockoutSecs = (data && typeof data.lockout_remaining_seconds === 'number' && data.lockout_remaining_seconds > 0)
+        ? data.lockout_remaining_seconds
+        : null;
+      const attempts = SecurityIntrusionGuard.recordFailedAttempt(false, explicitCount, lockoutSecs, (data && data.locked_user) || usr);
       const errMsg = (data && data.message)
         ? data.message
         : 'Invalid username or password. Please verify your credentials in your ERPNext account.';
       if (attempts >= SecurityIntrusionGuard.MAX_ATTEMPTS) {
-        showLoginError('🔒 Maximum 5 login attempts reached. Access locked for security. Please reset your ERPNext password.');
-        openResetPasswordModal(usr);
+        updateResetPasswordButtonVisibility(true);
+        showLoginError(formatCooldownMessage(lockoutSecs || SecurityIntrusionGuard.COOLDOWN_SECONDS));
+        openResetPasswordModal((data && data.locked_user) || usr);
       } else {
-        showLoginError(`⚠️ ${errMsg} (Attempt ${attempts} of 5)`);
+        showLoginError(formatLoginAttemptError(errMsg, attempts));
       }
     } catch (err) {
       if (pwdInput) pwdInput.value = '';
@@ -6984,27 +7548,42 @@ const BASELINE_ERP_TERRITORIES = [
       sessionStorage.removeItem('sfe_portal_user');
       isActivelyLoggingIn = false;
 
-      const attempts = SecurityIntrusionGuard.recordFailedAttempt();
+      const attempts = SecurityIntrusionGuard.recordFailedAttempt(false, null, null, usr);
       if (attempts >= SecurityIntrusionGuard.MAX_ATTEMPTS) {
-        showLoginError('🔒 Maximum 5 login attempts reached. Access locked for security. Please reset your ERPNext password.');
+        updateResetPasswordButtonVisibility(true);
+        showLoginError(formatCooldownMessage(SecurityIntrusionGuard.COOLDOWN_SECONDS));
         openResetPasswordModal(usr);
       } else if (err.name === 'AbortError') {
-        showLoginError(`Authentication timed out (15s). Please check your server connectivity. (Attempt ${attempts} of 5)`);
+        showLoginError(formatLoginAttemptError('Authentication timed out (15s). Please check your server connectivity.', attempts));
       } else {
-        showLoginError(`Authentication server error. Please verify your network connection. (Attempt ${attempts} of 5)`);
+        showLoginError(formatLoginAttemptError('Authentication server error. Please verify your network connection.', attempts));
       }
     } finally {
-      if (btn) btn.disabled = false;
+      if (btn) btn.disabled = Boolean(SecurityIntrusionGuard.lockoutUntil > Date.now());
       if (btnText) btnText.innerHTML = 'Login to Reconfiguration Portal';
     }
 
   }
   window.handlePortalLogin = handlePortalLogin;
 
+  function stripLoginAlertDecorations(msg) {
+    return String(msg || '')
+      .replace(/^[\s\u26A0\uFE0F\uD83D\uDD12\u274C\u2705]+/u, '')
+      .replace(/\s*\(Attempt\s+\d+\s+of\s+\d+\)/gi, '')
+      .replace(/\s*\(?Remaining Attempts?:\s*\d+\)?/gi, '')
+      .trim();
+  }
+
+  function formatLoginAttemptError(rawMsg, attempts) {
+    const base = stripLoginAlertDecorations(rawMsg);
+    const remaining = Math.max(0, SecurityIntrusionGuard.MAX_ATTEMPTS - attempts);
+    return `${base} Remaining Attempt: ${remaining}`;
+  }
+
   function showLoginError(msg) {
     const errBox = document.getElementById('loginErrorBox');
     if (errBox) {
-      errBox.innerHTML = `⚠️ ${escapeHtml(msg)}`;
+      errBox.textContent = String(msg || '').replace(/^[\s\u26A0\uFE0F\uD83D\uDD12\u274C\u2705]+/u, '').trim();
       errBox.style.display = 'block';
     }
   }
@@ -7070,10 +7649,16 @@ const BASELINE_ERP_TERRITORIES = [
     if (tabId === 'tab-realignment') {
       document.getElementById('btn-tab-realignment').classList.add('active');
       renderRealignmentAndArchive();
+      if (!activeTourKey) {
+        setTimeout(() => startInteractiveTour('tab-realignment', false), 220);
+      }
     }
     if (tabId === 'tab-summary') {
       document.getElementById('btn-tab-summary').classList.add('active');
       renderSummaryReport();
+      if (!activeTourKey) {
+        setTimeout(() => startInteractiveTour('tab-summary', false), 220);
+      }
     }
     if (tabId === 'tab-institutions') {
       const btnInst = document.getElementById('btn-tab-institutions');
@@ -7083,6 +7668,9 @@ const BASELINE_ERP_TERRITORIES = [
       }
       if (typeof syncLiveInstitutionsFromErp === 'function') {
         syncLiveInstitutionsFromErp(false);
+      }
+      if (!activeTourKey) {
+        setTimeout(() => startInteractiveTour('tab-institutions', false), 220);
       }
     }
   }
@@ -11467,6 +12055,9 @@ const BASELINE_ERP_TERRITORIES = [
     const currentMode = window.activeEditorViewMode || 'tree';
     const targetMode = (currentMode === 'tree') ? 'grid' : 'tree';
     setEditorViewMode(targetMode);
+    if (targetMode === 'grid' && !activeTourKey) {
+      setTimeout(() => startInteractiveTour('grid-view', false), 220);
+    }
   }
 
   function onTreeFilterInput(val) {
@@ -11972,6 +12563,13 @@ const BASELINE_ERP_TERRITORIES = [
     const clr = document.getElementById(fieldId + 'Clear');
     if (clr) clr.style.display = q ? 'block' : 'none';
     if (q.toLowerCase() === 'unassigned') q = '';
+    if (!q) {
+      const inp = document.getElementById(fieldId + 'Input');
+      if (inp) {
+        inp.value = '';
+        delete inp.dataset.userManuallySelected;
+      }
+    }
     
     renderErpDropdownMenu(fieldId, q);
     const menu = document.getElementById(fieldId + 'Menu');
@@ -12052,7 +12650,7 @@ const BASELINE_ERP_TERRITORIES = [
     }
     if (disp) {
       disp.value = '';
-      disp.placeholder = fieldId === 'newSpParent' ? 'Search parent sales person (default: Sales Team)...' : 'Unassigned';
+      disp.placeholder = fieldId === 'newSpParent' ? 'Search parent sales person...' : 'Unassigned';
       disp.focus();
     }
     if (clr) clr.style.display = 'none';
@@ -12196,34 +12794,10 @@ const BASELINE_ERP_TERRITORIES = [
       menu.appendChild(advRow);
 
     } else if (fieldId === 'newSpParent') {
-      // Parent Sales Person: Dynamically connects 1:1 to live Sales Person Tree DocType
-      // In main - staging: connected live to https://staging.pmii-marketing.com/app/sales-person/view/tree
-      // In sub_2 - dev: connected live to https://dev.pmii-marketing.com/app/sales-person/view/tree
-      // When tree is blank / fresh start (only Sales Team exists), ONLY Sales Team appears.
-      // SFE selects where the parent sales person branch it belongs in the tree.
-      const spPool = [];
-      const seenNames = new Set();
-
-      // Top Root Node: Sales Team (Root Master Team)
-      spPool.push({
-        name: 'Sales Team',
-        sales_person_name: 'Sales Team',
-        is_group: 1,
-        enabled: 1,
-        parent_sales_person: ''
-      });
-      seenNames.add('sales team');
-
-      // Add all live Sales Person tree nodes from ERPNext (availableSalesPersons)
-      if (Array.isArray(availableSalesPersons)) {
-        availableSalesPersons.forEach(s => {
-          const sName = (s && (s.sales_person_name || s.name)) ? String(s.sales_person_name || s.name).trim() : '';
-          if (!sName || seenNames.has(sName.toLowerCase())) return;
-          if (s.enabled === 0 || s.enabled === false) return;
-          seenNames.add(sName.toLowerCase());
-          spPool.push(s);
-        });
-      }
+      // Parent Sales Person: Program-based pool tied to #programSelect,
+      // excluding the top-level "Sales Team" container and cross-program branches, without truncation.
+      const currentProg = getSelectedProgramName();
+      const spPool = getProgramScopedSalesPersonPool(currentProg);
 
       // Filter by query tokens
       let matches = spPool.filter(s => {
@@ -12237,44 +12811,46 @@ const BASELINE_ERP_TERRITORIES = [
         return tokens.every(tok => searchable.includes(tok));
       });
 
+      const appendCustomParentOption = () => {
+        if (!rawQ || rawQ.toLowerCase() === 'sales team') return;
+        const customItem = document.createElement('div');
+        customItem.className = 'erp-dropdown-item';
+        customItem.style.borderTop = '1px solid rgba(148, 163, 184, 0.2)';
+        customItem.innerHTML = `
+          <div class="erp-dropdown-item-title" style="color:#0284C7; font-weight:700;">+ Add "${escapeHtml(rawQ)}"</div>
+          <div class="erp-dropdown-item-sub">New parent branch</div>
+        `;
+        customItem.onclick = () => {
+          if (typeof registerSalesPersonProgram === 'function') {
+            registerSalesPersonProgram(rawQ, currentProg);
+          }
+          selectErpItem('newSpParent', rawQ, rawQ, { name: rawQ, sales_person_name: rawQ, is_group: 1, parent_sales_person: 'Sales Team', program: currentProg });
+          closeAllErpDropdowns();
+        };
+        menu.appendChild(customItem);
+      };
+
       if (matches.length === 0) {
         const emptyDiv = document.createElement('div');
         emptyDiv.style.cssText = 'padding: 10px 14px; color: #64748B; font-size: 11.5px;';
         emptyDiv.innerText = rawQ
-          ? `No Sales Person in tree matching "${query}"`
-          : 'No Sales Persons found in tree';
+          ? `No ${currentProg} parent matching "${query}"`
+          : `No parent sales persons found for ${currentProg}`;
         menu.appendChild(emptyDiv);
-
-        if (rawQ) {
-          const customItem = document.createElement('div');
-          customItem.className = 'erp-dropdown-item';
-          customItem.style.borderTop = '1px solid rgba(148, 163, 184, 0.2)';
-          customItem.innerHTML = `
-            <div class="erp-dropdown-item-title" style="color:#38BDF8; font-weight:700;">📁 Set as new team branch: "${escapeHtml(rawQ)}"</div>
-            <div class="erp-dropdown-item-sub">Create and link under Sales Team</div>
-          `;
-          customItem.onclick = () => {
-            selectErpItem('newSpParent', rawQ, rawQ, { name: rawQ, sales_person_name: rawQ, is_group: 1, parent_sales_person: 'Sales Team' });
-            closeAllErpDropdowns();
-          };
-          menu.appendChild(customItem);
-        }
+        appendCustomParentOption();
       } else {
-        matches.slice(0, 50).forEach(s => {
+        matches.forEach(s => {
           const item = document.createElement('div');
           item.className = 'erp-dropdown-item';
           const name = s.sales_person_name || s.name;
-          const isRoot = name.toLowerCase() === 'sales team';
-          const isGroup = s.is_group === 1 || s.is_group === '1' || isRoot;
-          const parentDesc = s.parent_sales_person
-            ? `📁 Tree Branch (Parent: ${s.parent_sales_person})`
-            : (isRoot ? '📁 Root Sales Team (Top-level Tree Root)' : (s.employee ? `👤 MedRep • Employee: ${s.employee}` : '📁 Tree Branch'));
+          const rawParent = (s.parent_sales_person || '').trim();
+          const subLabel = (rawParent && rawParent.toLowerCase() !== 'sales team' && rawParent.toLowerCase() !== currentProg.toLowerCase())
+            ? `Parent: ${rawParent}`
+            : (s.employee ? `Employee: ${s.employee}` : '');
 
           item.innerHTML = `
-            <div class="erp-dropdown-item-title" style="${isRoot ? 'color:#38BDF8; font-weight:700;' : (isGroup ? 'color:#FBBF24; font-weight:700;' : '')}">
-              ${isGroup ? '📁 ' : '👤 '}${escapeHtml(name)}
-            </div>
-            <div class="erp-dropdown-item-sub">${escapeHtml(parentDesc)}</div>
+            <div class="erp-dropdown-item-title">${escapeHtml(name)}</div>
+            ${subLabel ? `<div class="erp-dropdown-item-sub">${escapeHtml(subLabel)}</div>` : ''}
           `;
           item.onclick = () => {
             selectErpItem('newSpParent', s.name || name, name, s);
@@ -12284,18 +12860,7 @@ const BASELINE_ERP_TERRITORIES = [
         });
 
         if (rawQ && !matches.some(m => (m.sales_person_name || m.name || '').toLowerCase() === rawQ.toLowerCase())) {
-          const customItem = document.createElement('div');
-          customItem.className = 'erp-dropdown-item';
-          customItem.style.borderTop = '1px solid rgba(148, 163, 184, 0.2)';
-          customItem.innerHTML = `
-            <div class="erp-dropdown-item-title" style="color:#38BDF8; font-weight:700;">📁 Set as new team branch: "${escapeHtml(rawQ)}"</div>
-            <div class="erp-dropdown-item-sub">Create and link under Sales Team</div>
-          `;
-          customItem.onclick = () => {
-            selectErpItem('newSpParent', rawQ, rawQ, { name: rawQ, sales_person_name: rawQ, is_group: 1, parent_sales_person: 'Sales Team' });
-            closeAllErpDropdowns();
-          };
-          menu.appendChild(customItem);
+          appendCustomParentOption();
         }
       }
 
@@ -12318,50 +12883,8 @@ const BASELINE_ERP_TERRITORIES = [
 
       // Filter Sales Persons across fields (name, sales_person_name, parent_sales_person, employee)
       // Strictly scope Territory Manager to activeProgram managers/reps
-      const seenSpNames = new Set();
-      const programScopedPool = [];
-
-      if (Array.isArray(availableSalesPersons)) {
-        availableSalesPersons.forEach(s => {
-          const spName = (s && (s.sales_person_name || s.name)) ? String(s.sales_person_name || s.name).trim() : '';
-          if (!spName || seenSpNames.has(spName.toLowerCase())) return;
-          if (isSalesPersonInProgram(s, activeProgram, false)) {
-            seenSpNames.add(spName.toLowerCase());
-            programScopedPool.push(s);
-          }
-        });
-      }
-
-      // Include the program-specific roster for activeProgram
-      const progRoster = (PROGRAM_SALES_PERSON_ROSTER && PROGRAM_SALES_PERSON_ROSTER[activeProgram]) || [];
-      progRoster.forEach(s => {
-        const spName = (s.sales_person_name || s.name || '').trim();
-        if (!spName || seenSpNames.has(spName.toLowerCase())) return;
-        seenSpNames.add(spName.toLowerCase());
-        programScopedPool.push(s);
-      });
-
-      // Also include any MedReps assigned to activeProgram territories if not yet in availableSalesPersons
-      if (typeof programTerritories !== 'undefined' && Array.isArray(programTerritories)) {
-        const allowedTerrs = getProgramTerritoryNames(activeProgram);
-        programTerritories.forEach(pt => {
-          const code = pt.activeCode || pt.histCode || pt.latestPrevCode;
-          if (code && !allowedTerrs.has(code)) return;
-          const rawRep = cleanRepDisplayName(pt.rep);
-          if (!rawRep || rawRep.toLowerCase().includes('unassigned') || rawRep.toLowerCase().includes('vacant') || rawRep.toLowerCase().includes('folder')) return;
-          if (!seenSpNames.has(rawRep.toLowerCase())) {
-            seenSpNames.add(rawRep.toLowerCase());
-            programScopedPool.push({
-              name: rawRep,
-              sales_person_name: rawRep,
-              parent_sales_person: activeProgram,
-              is_group: 0,
-              enabled: 1,
-              program: activeProgram
-            });
-          }
-        });
-      }
+      const currentProg = getSelectedProgramName();
+      const programScopedPool = getProgramScopedSalesPersonPool(currentProg);
 
       let matches = programScopedPool.filter(s => {
         if (s.enabled === 0 || s.enabled === false) return false;
@@ -12898,13 +13421,19 @@ const BASELINE_ERP_TERRITORIES = [
     clearErpSelection('newSpEmployee');
     clearErpSelection('newSpUserAccount');
     
-    // Set parent sales person to Sales Team default
+    // Reset parent sales person selection (blank UI; falls back to Sales Team on save if unset)
     const parentInp = document.getElementById('newSpParentInput');
     const parentDisp = document.getElementById('newSpParentDisplay');
     const parentClr = document.getElementById('newSpParentClear');
-    if (parentInp) parentInp.value = 'Sales Team';
-    if (parentDisp) parentDisp.value = 'Sales Team';
-    if (parentClr) parentClr.style.display = 'block';
+    if (parentInp) {
+      parentInp.value = '';
+      delete parentInp.dataset.userManuallySelected;
+    }
+    if (parentDisp) {
+      parentDisp.value = '';
+      parentDisp.placeholder = 'Search parent sales person...';
+    }
+    if (parentClr) parentClr.style.display = 'none';
 
     const commInp = document.getElementById('newSpCommissionInput');
     if (commInp) commInp.value = '';
@@ -16948,9 +17477,9 @@ const BASELINE_ERP_TERRITORIES = [
             Parent Sales Person
           </label>
           <div class="erp-search-container" id="newSpParentContainer">
-            <input type="hidden" id="newSpParentInput" value="Sales Team">
-            <input type="text" id="newSpParentDisplay" value="Sales Team" class="erp-search-input-box" placeholder="Search parent sales person..." autocomplete="off" onfocus="openErpDropdown('newSpParent', true)" onclick="toggleErpDropdown('newSpParent', event)" oninput="onErpSearchInput('newSpParent')">
-            <button type="button" class="erp-clear-btn" id="newSpParentClear" style="display:block;" onclick="clearErpSelection('newSpParent')">✕</button>
+            <input type="hidden" id="newSpParentInput" value="">
+            <input type="text" id="newSpParentDisplay" value="" class="erp-search-input-box" placeholder="Search parent sales person..." autocomplete="off" onfocus="openErpDropdown('newSpParent', true)" onclick="toggleErpDropdown('newSpParent', event)" oninput="onErpSearchInput('newSpParent')">
+            <button type="button" class="erp-clear-btn" id="newSpParentClear" style="display:none;" onclick="clearErpSelection('newSpParent')">✕</button>
             <span class="erp-search-chevron" onclick="toggleErpDropdown('newSpParent', event)">▾</span>
             <div class="erp-dropdown-menu" id="newSpParentMenu"></div>
           </div>
@@ -17512,88 +18041,96 @@ const BASELINE_ERP_TERRITORIES = [
   </div>
 </div>
 
-<!-- MODAL: Interactive SFE User Guide & Navigation Walkthrough (v.0.1.1) -->
-<div class="modal-overlay" id="userGuideModalOverlay" style="z-index:9999;">
-  <div class="modal-card" style="max-width:640px; border-radius:12px; border:1px solid #CBD5E1; box-shadow:0 16px 40px rgba(15,23,42,0.18); max-height:88vh; overflow-y:auto; padding:24px;">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; border-bottom:1px solid #E2E8F0; padding-bottom:14px;">
-      <div>
-        <h3 style="font-size:17px; font-weight:800; color:#0F172A; margin:0 0 4px 0;">Territory Reconfiguration User Guide</h3>
-        <p style="font-size:12px; color:#64748B; margin:0; font-weight:500;">Workflow navigation and territory administration manual</p>
-      </div>
-      <button type="button" onclick="closeUserGuideModal()" style="background:none; border:none; color:#94A3B8; font-size:22px; cursor:pointer; line-height:1; font-weight:bold; padding:0 4px;" title="Close">&times;</button>
+<!-- INTERACTIVE SPOTLIGHT COACH-MARK TOUR OVERLAY (GCash-style First-Time Feature Guide) -->
+<style>
+  #interactiveTourOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 99998;
+    pointer-events: auto;
+  }
+  #interactiveTourSpotlight {
+    display: none;
+    position: fixed;
+    border-radius: 10px;
+    box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.72), 0 0 0 3px #0066FF, 0 0 24px rgba(0, 102, 255, 0.55);
+    pointer-events: none;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 99999;
+  }
+  #interactiveTourCard {
+    position: fixed;
+    width: 340px;
+    max-width: calc(100vw - 32px);
+    background: #FFFFFF;
+    border: 1.5px solid #BFDBFE;
+    border-radius: 12px;
+    box-shadow: 0 20px 45px rgba(15, 23, 42, 0.28);
+    padding: 16px 18px;
+    z-index: 100000;
+    box-sizing: border-box;
+    animation: modalPopIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .interactive-tour-arrow {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    background: #FFFFFF;
+    border: 1.5px solid #BFDBFE;
+    transform: rotate(45deg);
+    pointer-events: none;
+  }
+  .interactive-tour-arrow.arrow-bottom {
+    border-right: none;
+    border-bottom: none;
+  }
+  .interactive-tour-arrow.arrow-top {
+    border-left: none;
+    border-top: none;
+  }
+  .interactive-tour-arrow.arrow-right {
+    border-right: none;
+    border-top: none;
+  }
+  .interactive-tour-arrow.arrow-left {
+    border-left: none;
+    border-bottom: none;
+  }
+  .interactive-tour-dots {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .interactive-tour-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: #CBD5E1;
+    transition: all 0.15s ease;
+  }
+  .interactive-tour-dot.active {
+    width: 16px;
+    background: #0066FF;
+  }
+</style>
+
+<div id="interactiveTourOverlay">
+  <div id="interactiveTourSpotlight"></div>
+  <div id="interactiveTourCard" role="dialog" aria-modal="true" aria-labelledby="interactiveTourTitle">
+    <div id="interactiveTourArrow" class="interactive-tour-arrow arrow-bottom"></div>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <span id="interactiveTourStepBadge" style="display:inline-flex; align-items:center; padding:3px 9px; border-radius:999px; background:#EFF6FF; color:#0066FF; font-size:11px; font-weight:800; letter-spacing:0.3px;">Step 1 of 7</span>
+      <button type="button" id="interactiveTourSkipBtn" onclick="skipInteractiveTour()" style="background:transparent; border:none; color:#64748B; font-size:12px; font-weight:700; cursor:pointer; padding:2px 6px; border-radius:4px;">Skip</button>
     </div>
-
-    <!-- Guide Content: Minimalist, Professional & Cohesive Typography -->
-    <div style="display:flex; flex-direction:column; gap:14px; margin-bottom:20px;">
-
-      <!-- Section 1: Navigation & Workspaces -->
-      <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:14px 16px;">
-        <div style="font-weight:700; font-size:13px; color:#0F172A; margin-bottom:6px;">
-          1. Workspaces &amp; Navigation
-        </div>
-        <div style="font-size:12px; color:#475569; line-height:1.6;">
-          &bull; <strong>Reconfiguration Editor:</strong> Switch between <em>Table Grid</em> (fast spreadsheet entry, filtering, and bulk operations) and <em>Territory Tree</em> (interactive visual hierarchy).<br>
-          &bull; <strong>Archive Directory:</strong> Access archived territories and historical vacant codes with zero doctor data loss.<br>
-          &bull; <strong>Summary Report:</strong> Full audit ledger tracking every change, renaming diff, representative transfer, and timestamp.
-        </div>
+    <h4 id="interactiveTourTitle" style="margin:0 0 6px 0; font-size:15px; font-weight:800; color:#0F172A;">Select Active Program</h4>
+    <p id="interactiveTourDesc" style="margin:0 0 14px 0; font-size:12.5px; color:#475569; line-height:1.5;">Switch active program here.</p>
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+      <div id="interactiveTourDots" class="interactive-tour-dots"></div>
+      <div style="display:inline-flex; align-items:center; gap:8px;">
+        <button type="button" id="interactiveTourPrevBtn" onclick="prevInteractiveTourStep()" style="display:none; align-items:center; justify-content:center; padding:7px 12px; border-radius:7px; border:1px solid #CBD5E1; background:#FFFFFF; color:#334155; font-size:12px; font-weight:700; cursor:pointer;">Back</button>
+        <button type="button" id="interactiveTourNextBtn" onclick="nextInteractiveTourStep()" style="display:inline-flex; align-items:center; justify-content:center; padding:7px 14px; border-radius:7px; border:none; background:#0066FF; color:#FFFFFF; font-size:12px; font-weight:700; cursor:pointer;">Next</button>
       </div>
-
-      <!-- Section 2: Action Button Guide -->
-      <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:14px 16px;">
-        <div style="font-weight:700; font-size:13px; color:#0F172A; margin-bottom:6px;">
-          2. Territory Management Actions
-        </div>
-        <div style="font-size:12px; color:#475569; line-height:1.6;">
-          Use the <strong>Actions</strong> menu on any row or via the workbench header:<br>
-          &bull; <strong>Edit:</strong> Update territory properties, target quotas, and district managers.<br>
-          &bull; <strong>Add Child:</strong> Create child territories and sub-branches under any selected node.<br>
-          &bull; <strong>Rename:</strong> Batch rename territory codes with real-time diff previews.<br>
-          &bull; <strong>Audit Trail:</strong> Inspect the full change ledger and timestamp history for any territory.
-        </div>
-      </div>
-
-      <!-- Section 3: Doctor Transfer & Handover -->
-      <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:14px 16px;">
-        <div style="font-weight:700; font-size:13px; color:#0F172A; margin-bottom:6px;">
-          3. Doctor Handover &amp; Transfer
-        </div>
-        <div style="font-size:12px; color:#475569; line-height:1.6;">
-          Launch <strong>Transfer / Merge Doctors</strong> from the workbench or row menu to reassign doctors between territories using the two-pane transfer tool with real-time doctor count recalculation.
-        </div>
-      </div>
-
-      <!-- Section 4: Strict No-Deletion Policy -->
-      <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:14px 16px;">
-        <div style="font-weight:700; font-size:13px; color:#0F172A; margin-bottom:6px;">
-          4. Inactive &amp; Vacant Policy (No Deletion)
-        </div>
-        <div style="font-size:12px; color:#475569; line-height:1.6;">
-          When a Medical Representative departs, their territory is tagged as <strong>Inactive</strong>.
-          The code remains preserved as <strong>Vacant</strong> so that when a new representative is assigned, doctor profiling history is seamlessly retained without disruption.
-        </div>
-      </div>
-
-      <!-- Section 5: SFE Institution Approvals & Masterlist Sync -->
-      <div style="background:#EFF6FF; border:1px solid #BFDBFE; border-radius:8px; padding:14px 16px;">
-        <div style="font-weight:700; font-size:13px; color:#1E40AF; margin-bottom:6px;">
-          5. SFE Institution Approvals &amp; Real-Time Mobile App Sync
-        </div>
-        <div style="font-size:12px; color:#1E3A8A; line-height:1.6;">
-          Open <strong>Institution Approvals</strong> in the left sidebar to review new facilities discovered by MedReps on the HCP Profiling Mobile App:<br>
-          &bull; <strong>Normalize &amp; Approve:</strong> Standardize facility names (Proper Case), Ownership (Government/Private), Type (Hospital/Clinic), Service Capability, and official PSGC Region/Province/City codes before approving.<br>
-          &bull; <strong>Government Routing:</strong> Government facilities automatically route to <em>Pending DSM Approval</em> prior to final masterlist activation.<br>
-          &bull; <strong>Duplicate Remapping:</strong> Remap duplicate proposals to an existing canonical <code>INST-XXXXX</code> record and automatically update linked doctors.<br>
-          &bull; <strong>Direct Mobile Sync:</strong> Approved facilities immediately sync to the HCP Mobile App's <em>Institution Directory</em> and doctor workplace records.
-        </div>
-      </div>
-
-    </div>
-
-    <!-- Modal Footer: Minimalist Clean Button -->
-    <div style="display:flex; justify-content:flex-end; align-items:center; border-top:1px solid #E2E8F0; padding-top:14px;">
-      <button type="button" class="btn btn-primary" onclick="closeUserGuideModal()" style="background:#0066FF; color:#FFFFFF; font-weight:700; font-size:12.5px; padding:8px 24px; border-radius:6px; cursor:pointer; border:none; transition:background 0.15s ease;">
-        Close Guide
-      </button>
     </div>
   </div>
 </div>
