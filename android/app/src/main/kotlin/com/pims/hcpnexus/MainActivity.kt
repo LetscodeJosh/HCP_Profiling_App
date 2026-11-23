@@ -1,4 +1,4 @@
-package com.pims.hcp_profiling
+package com.pims.hcpnexus
 
 import io.flutter.embedding.android.FlutterFragmentActivity
 

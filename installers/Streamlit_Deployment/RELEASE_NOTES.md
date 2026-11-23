@@ -1,3 +1,29 @@
+## [v.0.1.3 - Authoritative Live ERPNext Deletion Sync & Shared State Auto-Pruning] - 2026-11-20
+
+### Key Enhancements & Fixes Applied
+- **Top Header Bar Versioning (`v.0.1.3`)**: Updated the top navigation version badge (`#headerPortalVersionBadge`) and `VERSION` tracker to `v.0.1.3`.
+- **Authoritative Live ERPNext Territory Deletion Sync (`app.py`)**:
+  - Updated `merge_shared_territories_into_list(..., is_live_erpnext=False)` and `fetch_live_territories()` so live ERPNext responses are authoritative for territory existence.
+  - Automatically prunes territories deleted directly in ERPNext from `shared_territory_state.json` on refresh instead of re-appending them, while retaining `Vacant` / `Inactive` status overlays on active territories and `pending_erp_sync=True` resilience for offline creations.
+
+---
+
+## [v.0.1.2 - UX Enhancements, Tree/Grid Sync, Sales Person Code Sync & Intelligent Bulk Operation] - 2026-11-20
+
+### Key Enhancements & Fixes Applied
+- **Top Header Bar Versioning (`v.0.1.2`)**: Displayed the active portal version badge (`v.0.1.2` via `#headerPortalVersionBadge`) directly beside `HCP Profiling • Territory Reconfiguration Portal` in the top navigation bar.
+- **Animated Sidebar Toggle**: Added smooth CSS transitions on the hamburger icon (`#sidebarToggleBtn`) reflecting open/closed menu states.
+- **Sales Person Code Synchronization on Territory Rename**: Single and bulk territory renames automatically update parenthesized territory codes `(CODE)` on matching Sales Person records in both the portal dropdown/tree and ERPNext backend (`_sync_sales_person_code_on_territory_rename`).
+- **Parent-Subtree Search Preservation**: Filtering the Territory Tree retains matching parent territories together with their child subtrees.
+- **Bidirectional Table Grid & Territory Tree Sync**: Status updates, edits, renames, child additions, and doctor transfers from Table Grid synchronize live with Territory Tree View and ERPNext persistence.
+- **Streamlined Action Menus, Modals, Audit Trail & Bulk Operation**:
+  - Dynamically hides `Set Active` for `Active` rows and simplifies row action labels to `Vacant`, `Inactive`, and `Transfer Doctor`.
+  - Streamlined operational status confirmation modal (removed redundant policy banner and status dropdown while keeping `Territory Code`, `Current MedRep`, and `Affiliated Doctors`).
+  - Upgraded Audit Trail with structured summary cards, decoded text formatting, clear action badges, and performer fallback (`SFE Lead`).
+  - Removed decorative icons/emojis across portal windows, renamed Bulk Edit to `Bulk Operation` (`Assigned MedRep`, `Assigned District`), added an editable per-row + global helper Bulk Rename workbench with collision checks, and simplified the Archive tab.
+
+---
+
 ## [v.0.1.1 - Hotfix: MedRep Tagging Status Validation, Table Grid Alignment, ERPNext Direct Deletion Sync & Theme Refinement] - 2026-11-10
 
 ### 🎯 Key Bug Fixes & Architectural Enhancements Applied
@@ -48,3 +74,14 @@
   - Resignation & Handover quick merge with ERPNext HR employee/user ID auto-population.
   - Live multi-user Institution Approvals sync and MedRep Submission workbench.
 - 100% SHA-256 byte-for-byte parity across all 7 mirrored portal files.
+
+---
+
+## [v.0.1.0 - Initial Release: SFE Territory Reconfiguration Web Portal] - 2026-10-18
+
+### Initial Release Foundation
+- **Dedicated Versioning**: Established standalone web application versioning starting at `v.0.1.0` with dedicated `VERSION` tracking file (`git tag v.0.1.0` at commit `1f87ffc`).
+- **Realignment Tab Refinement**: Eliminated active district cluster grids to retain strictly the Archived & Inactive Territories Directory Vault.
+- **Summary Report & Audit Trail UI/UX**: Unified KPI summary numbers and added sticky headers with scrollable viewports for deep audit logs.
+- **Strict No-Deletion Architecture**: Replaced permanent territory deletion in table actions with a safe **Tag Inactive / Vacant** workflow and live ERPNext synchronization.
+- **Interactive Guidance Engine**: Implemented first-time user login detection with an interactive onboarding walkthrough.

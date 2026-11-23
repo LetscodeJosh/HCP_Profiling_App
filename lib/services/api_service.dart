@@ -1153,7 +1153,7 @@ class ApiService extends ChangeNotifier {
       }
     }
     final wildcardUrl = Uri.parse(
-      '$baseUrl/api/resource/Institution?fields=["*"]&order_by=name%20desc&limit_page_length=0',
+      '$baseUrl/api/resource/Institution?fields=["*","name","institution_name","region_name","province_name","city_municipality","workflow_state","rejection_reason","owner","creation","modified","docstatus","ownership","institution_type","service_capability"]&order_by=name%20desc&limit_page_length=0',
     );
     final coreFallbackUrl = Uri.parse(
       '$baseUrl/api/resource/Institution?fields=["name","institution_name","region_name","province_name","city_municipality","workflow_state","rejection_reason","owner","creation","modified","docstatus","ownership","institution_type","service_capability"]&order_by=name%20desc&limit_page_length=0',
@@ -1174,9 +1174,9 @@ class ApiService extends ChangeNotifier {
         // Hydrate PIMS_META & Audit Trail from Frappe Comment doctype (ensures 100% sync with SFE Web Portal)
         try {
           final commentUrl = Uri.parse(
-            '$baseUrl/api/resource/Comment?fields=["name","reference_name","content","comment_by","owner","creation"]&filters=[["reference_doctype","=","Institution"]]&order_by=creation%20asc&limit_page_length=1000',
+            '$baseUrl/api/resource/Comment?fields=["name","reference_name","content","comment_by","owner","creation"]&filters=[["reference_doctype","=","Institution"]]&order_by=creation%20desc&limit_page_length=2500',
           );
-          final commentRes = await http.get(commentUrl, headers: _headers).timeout(const Duration(seconds: 8));
+          final commentRes = await http.get(commentUrl, headers: _headers).timeout(const Duration(seconds: 10));
           if (commentRes.statusCode == 200) {
             final cBody = jsonDecode(commentRes.body);
             final List<dynamic> comments = cBody['data'] ?? [];
@@ -1194,6 +1194,8 @@ class ApiService extends ChangeNotifier {
               final instId = (instMap['name'] ?? '').toString();
               final instComments = commentsByInst[instId];
               if (instComments != null && instComments.isNotEmpty) {
+                // Sort chronologically ascending so that the newest review/rejection takes final precedence
+                instComments.sort((a, b) => (a['creation'] ?? '').toString().compareTo((b['creation'] ?? '').toString()));
                 final List<Map<String, dynamic>> trail = [];
                 for (final c in instComments) {
                   final rawContent = (c['content'] ?? '').toString();
@@ -1206,6 +1208,12 @@ class ApiService extends ChangeNotifier {
                           instMap[mk] = mv;
                         }
                       });
+                      if (metaObj['workflow_state'] != null && metaObj['workflow_state'].toString().isNotEmpty) {
+                        instMap['workflow_state'] = metaObj['workflow_state'];
+                      }
+                      if (metaObj['rejection_reason'] != null && metaObj['rejection_reason'].toString().isNotEmpty) {
+                        instMap['rejection_reason'] = metaObj['rejection_reason'];
+                      }
                       trail.add({
                         'timestamp': (metaObj['timestamp'] ?? c['creation'] ?? '').toString(),
                         'user': (metaObj['user'] ?? c['comment_by'] ?? c['owner'] ?? 'SFE Specialist').toString(),
@@ -1220,6 +1228,12 @@ class ApiService extends ChangeNotifier {
                       if (cleanTxt.toLowerCase().contains('certified by medrep')) {
                         instMap['is_certified'] = 1;
                         instMap['certification_note'] = cleanTxt;
+                      }
+                      if (cleanTxt.toLowerCase().contains('reject')) {
+                        instMap['workflow_state'] = 'Rejected';
+                        if (instMap['rejection_reason'] == null || instMap['rejection_reason'].toString().isEmpty) {
+                          instMap['rejection_reason'] = cleanTxt;
+                        }
                       }
                       trail.add({
                         'timestamp': (c['creation'] ?? '').toString(),
@@ -1333,6 +1347,47 @@ class ApiService extends ChangeNotifier {
         }
       }
     }
+
+    // Bi-directional sync: Back-propagate rejections from linked HCP Accounts & Submissions if comments had sync delay
+    for (final acc in _cachedHcpAccounts) {
+      final isAccRejected = (acc.rejectedInstitutionTag != null && acc.rejectedInstitutionTag!.trim().isNotEmpty) ||
+          (acc.rejectionReason != null && acc.rejectionReason!.trim().isNotEmpty) ||
+          (acc.workplaceApprovalNote != null && acc.workplaceApprovalNote!.toUpperCase().contains('REJECTED'));
+      if (isAccRejected) {
+        final wpKey = (acc.workplaceId ?? '').trim().toLowerCase();
+        final reason = acc.rejectionReason ?? acc.rejectedInstitutionTag ?? 'Rejected by SFE';
+        for (int i = 0; i < institutions.length; i++) {
+          final inst = institutions[i];
+          if ((inst.name.toLowerCase() == wpKey || inst.institutionName.toLowerCase() == wpKey) && !inst.isApproved) {
+            institutions[i] = inst.copyWith(
+              workflowState: 'Rejected',
+              rejectionReason: (inst.rejectionReason != null && inst.rejectionReason!.isNotEmpty) ? inst.rejectionReason : reason,
+            );
+          }
+        }
+      }
+    }
+
+    for (final sub in _cachedSubmissions) {
+      final isSubRejected = (sub.rejectionRemarks != null && sub.rejectionRemarks!.trim().isNotEmpty) ||
+          (sub.workflowState != null && sub.workflowState!.toLowerCase().contains('reject'));
+      if (isSubRejected) {
+        final reason = sub.rejectionRemarks ?? 'Rejected by SFE';
+        for (final wp in sub.workplaces) {
+          final wpKey = (wp.hcpWorkplace ?? wp.workplaceName ?? '').trim().toLowerCase();
+          if (wpKey.isEmpty) continue;
+          for (int i = 0; i < institutions.length; i++) {
+            final inst = institutions[i];
+            if ((inst.name.toLowerCase() == wpKey || inst.institutionName.toLowerCase() == wpKey) && !inst.isApproved) {
+              institutions[i] = inst.copyWith(
+                workflowState: 'Rejected',
+                rejectionReason: (inst.rejectionReason != null && inst.rejectionReason!.isNotEmpty) ? inst.rejectionReason : reason,
+              );
+            }
+          }
+        }
+      }
+    }
   }
 
   /// List of actual active masterlist institutions for doctor profiling.
@@ -1344,10 +1399,18 @@ class ApiService extends ChangeNotifier {
   /// List of institutions submitted by the currently logged-in user
   List<Institution> get mySubmittedInstitutions {
     final email = (loggedInEmail ?? '').trim().toLowerCase();
-    if (email.isEmpty) return [];
     return _cachedInstitutions.where((i) {
       final o = (i.owner ?? '').trim().toLowerCase();
-      return o == email;
+      if (email.isNotEmpty && (o == email || o.contains(email) || email.contains(o))) {
+        return true;
+      }
+      // Any institution with an active review or rejection belongs in the user's tracking list
+      if (i.isRejected || i.isPendingApproval || i.workflowState == 'Pending DSM Approval') {
+        if (o.isEmpty || email.isEmpty || o == email || o == 'medrep' || o == 'administrator') {
+          return true;
+        }
+      }
+      return false;
     }).toList();
   }
 

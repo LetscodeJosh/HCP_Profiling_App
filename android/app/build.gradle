@@ -22,9 +22,17 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('key.properties')
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withReader('UTF-8') { reader ->
+        keystoreProperties.load(reader)
+    }
+}
+
 android {
-    namespace "com.pims.hcp_profiling"
-    compileSdk flutter.compileSdkVersion
+    namespace = "com.pims.hcpnexus"
+    compileSdk = 36
     ndkVersion flutter.ndkVersion
 
     compileOptions {
@@ -43,8 +51,19 @@ android {
 
     signingConfigs {
         release {
+            def propStoreFile = keystoreProperties.getProperty('storeFile')
             def envKeystore = System.getenv("KEYSTORE_PATH") ?: (project.hasProperty("RELEASE_STORE_FILE") ? project.property("RELEASE_STORE_FILE") : null)
-            if (envKeystore && file(envKeystore).exists()) {
+            if (propStoreFile && file(propStoreFile).exists()) {
+                storeFile file(propStoreFile)
+                storePassword keystoreProperties.getProperty('storePassword', '')
+                keyAlias keystoreProperties.getProperty('keyAlias', '')
+                keyPassword keystoreProperties.getProperty('keyPassword', '')
+            } else if (propStoreFile && rootProject.file(propStoreFile).exists()) {
+                storeFile rootProject.file(propStoreFile)
+                storePassword keystoreProperties.getProperty('storePassword', '')
+                keyAlias keystoreProperties.getProperty('keyAlias', '')
+                keyPassword keystoreProperties.getProperty('keyPassword', '')
+            } else if (envKeystore && file(envKeystore).exists()) {
                 storeFile file(envKeystore)
                 storePassword System.getenv("KEYSTORE_PASSWORD") ?: (project.hasProperty("RELEASE_STORE_PASSWORD") ? project.property("RELEASE_STORE_PASSWORD") : "")
                 keyAlias System.getenv("KEY_ALIAS") ?: (project.hasProperty("RELEASE_KEY_ALIAS") ? project.property("RELEASE_KEY_ALIAS") : "")
@@ -61,11 +80,11 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.pims.hcp_profiling"
-        minSdkVersion flutter.minSdkVersion
-        targetSdkVersion 34
-        versionCode flutterVersionCode.toInteger()
-        versionName flutterVersionName
+        applicationId = "com.pims.hcpnexus"
+        minSdk = 23 /* Preserve API 23 against Flutter MinSdkVersionMigration */
+        targetSdk = 36
+        versionCode = flutterVersionCode.toInteger()
+        versionName = flutterVersionName
         manifestPlaceholders = [
             appName: "PIMS HCP",
             applicationName: "android.app.Application"
