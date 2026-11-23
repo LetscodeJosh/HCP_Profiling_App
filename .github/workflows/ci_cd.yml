@@ -2,10 +2,10 @@ name: HCP Profiling & Territory Reconfiguration CI/CD
 
 on:
   push:
-    branches: [ main, master, sub_initial, sub_final ]
+    branches: [ main, master, dev, staging, sub_initial, sub_final ]
     tags: [ 'v*', 'V*' ]
   pull_request:
-    branches: [ main, master, sub_initial, sub_final ]
+    branches: [ main, master, dev, staging, sub_initial, sub_final ]
   workflow_dispatch:
 
 permissions:

@@ -53,3 +53,12 @@ secrets.toml
 .streamlit/secrets.toml
 *.pem
 *.key
+
+# Android Play Store Signing Secrets (Never commit)
+*.jks
+*.keystore
+key.properties
+android/key.properties
+releases/PlayStore_Release_v1.0.0/upload_keystore/
+**/upload_keystore/
+*KEYSTORE_CREDENTIALS*

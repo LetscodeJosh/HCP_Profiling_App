@@ -5,6 +5,16 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ---
 
+## [v.1.0.0] - 2026-11-23
+### Play Store Production Release & Android Configuration
+- **Google Play Store Reconfiguration (`com.pims.hcpnexus`)**:
+  - Updated Android `namespace` and `applicationId` to `com.pims.hcpnexus` with matching Kotlin `MainActivity` package.
+  - Set Android SDK configuration to `minSdk = 23`, `targetSdk = 36` (`compileSdk = 36`) in compliance with Google Play API 36 requirements.
+  - Reset initial Play Store release versioning to `versionCode = 1` and `versionName = 1.0.0` (`1.0.0+1`).
+  - Configured release upload keystore signing (`pims_hcp_upload`) and packaged error-free signed `.aab` (`pims-hcpnexus-rel-1.0.0.aab`) alongside release `.apk` artifacts.
+
+---
+
 ## [v.0.8.1] - 2026-11-12
 
 ### 🏥 Bi-Directional SFE Institution Approval Synchronization & Lockscreen Rejection Notifications
