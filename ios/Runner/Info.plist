@@ -24,23 +24,43 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>HCP Nexus needs location access to geotag profiling records.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>HCP Nexus needs camera access to capture geotagged photos.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>HCP Nexus needs photo library access to select physician profile and consent images.</string>
-	<key>NSFaceIDUsageDescription</key>
-	<string>HCP Nexus requires Face ID access for quick and secure biometric login.</string>
-	<key>UIFileSharingEnabled</key>
-	<false/>
-	<key>LSSupportsOpeningDocumentsInPlace</key>
-	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>HCP Nexus needs camera access to capture geotagged photos.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>HCP Nexus requires Face ID access for quick and secure biometric login.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>HCP Nexus needs location access to geotag profiling records.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>HCP Nexus needs photo library access to select physician profile and consent images.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>UIWindowScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>flutter</string>
+					<key>UISceneDelegateClassName</key>
+					<string>FlutterSceneDelegate</string>
+					<key>UISceneStoryboardFile</key>
+					<string>Main</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIFileSharingEnabled</key>
+	<false/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

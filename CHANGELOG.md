@@ -5,6 +5,19 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ---
 
+## [v.1.0.0] - 2026-11-24
+### Initial TestFlight iOS UAT Baseline (`1.0.0+1`) — Full 1,328 Institution Sync, Compact Static Pagination & Clean Submission/Audit Log UI
+- **Accurate ERPNext Institution Count (`1,328` Records)**:
+  - Updated `ApiService.fetchInstitutions()` to paginate cleanly across all ERPNext `Institution` records in `500`-record batches with wildcard, core-field, and `frappe.client.get_list` tiers, eliminating partial/default page caps or fallback truncation, and synchronized `HcpDashboardScreen` KPI institution count.
+- **Static Compact Responsive Pagination (`PaginatedFooterBar`)**:
+  - Added a low-height, always-accessible static docked pagination bar matching the web portal format (`Showing X–Y of Z`, `◀ Prev [ 1 / N ] Next ▶`, `Rows: [ 20 | 40 | 80 | 100 ]`), adapting cleanly from a single horizontal row on iPad/tablets to a compact 2-line wrap on mobile.
+- **Header, Drawer & Institution Submission Redesign + Audit Log**:
+  - Removed the `Propose Institution` button and AppBar subtitles on **Institution Directory** and **Institution Submission**, removed drawer subtitles (`Master Reference`, `Track & Resubmit`) and the `Active` badge on `HCP Profile Submissions`.
+  - Removed the 5 top KPI cards, `"Awaiting SFE Review"`, and `"For SFE Approval: Awaiting SFE Specialist review."` notices; centered all 5 status tabs (`All`, `Pending Approval`, `Pending DSM Approval`, `Approved`, `Rejected`) with colored outline hover states and balanced top-left search box spacing; restricted direct Institution Edit/Remap/Resubmit actions strictly to `SFE` and `Admin` roles.
+  - Upgraded `InstitutionAuditTrailDialog` into a structured **Facility Overview** + chronological **Activity Timeline** **Institution Audit Log**.
+
+---
+
 ## [v.1.0.1] - 2026-11-24
 ### Play Store Staging Release Alignment, Official `HCP Nexus` HD Branding & Indexed Pagination (`1.0.1+2`)
 - **Play Store Console Versioning (`com.pims.hcpnexus`, `staging`)**:

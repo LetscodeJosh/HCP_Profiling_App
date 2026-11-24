@@ -80,6 +80,7 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
 
   Future<void> _openEditAndResubmitDialog(Institution inst) async {
     final apiService = Provider.of<ApiService>(context, listen: false);
+    if (!apiService.isSfe && !apiService.isAdmin) return;
     final currentUser = apiService.loggedInFullName ?? apiService.loggedInEmail ?? 'User';
 
     if (inst.isCooldownActive &&
@@ -1095,18 +1096,9 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
       appBar: AppBar(
         backgroundColor: const Color(0xFF0B192C),
         elevation: 0,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Institution Submission',
-              style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              isManager ? 'DSM / SFE Facility Review & Approvals' : 'Request Status & Resubmissions',
-              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-            ),
-          ],
+        title: const Text(
+          'Institution Submission',
+          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
         ),
         actions: [
           IconButton(
@@ -1121,9 +1113,6 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
         color: const Color(0xFF0066FF),
         child: Column(
           children: [
-            // KPI Cards Overview
-            _buildMedRepKpiSection(pendingCount, dsmPendingCount, approvedCount, rejectedCount, requests.length, isManager),
-
             // Notification Banner for Rejected or Newly Approved
             if (rejectedCount > 0)
               Container(
@@ -1140,7 +1129,9 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        '$rejectedCount facility request${rejectedCount > 1 ? 's were' : ' was'} rejected by SFE. Tap "Modify & Resubmit" to correct and resubmit for approval.',
+                        (apiService.isSfe || apiService.isAdmin)
+                            ? '$rejectedCount facility request${rejectedCount > 1 ? 's were' : ' was'} rejected by SFE. Tap "Modify & Resubmit" to correct and resubmit for approval.'
+                            : '$rejectedCount facility request${rejectedCount > 1 ? 's were' : ' was'} rejected by SFE. Tap "Audit Log" to review feedback and history.',
                         style: const TextStyle(color: Color(0xFF991B1B), fontSize: 12, fontWeight: FontWeight.w600),
                       ),
                     ),
@@ -1148,8 +1139,8 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
                 ),
               ),
 
-            // Search Bar & Filter Tabs
-            _buildSearchAndFilters(pendingCount, dsmPendingCount, approvedCount, rejectedCount, isManager),
+            // Search Bar & 5 Status Tabs
+            _buildSearchAndFilters(pendingCount, dsmPendingCount, approvedCount, rejectedCount, requests.length, isManager),
 
             // Requests List
             Expanded(
@@ -1169,167 +1160,108 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
     );
   }
 
-  Widget _buildMedRepKpiSection(int pending, int dsmPending, int approved, int rejected, int total, bool isManager) {
+  Widget _buildSearchAndFilters(
+    int pending,
+    int dsmPending,
+    int approved,
+    int rejected,
+    int totalCount,
+    bool isManager,
+  ) {
     return Container(
-      color: const Color(0xFF0B192C),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      child: Row(
-        children: [
-          _buildKpiCard('Awaiting SFE', pending.toString(), Icons.hourglass_top_rounded, const Color(0xFFF59E0B)),
-          const SizedBox(width: 8),
-          if (isManager || dsmPending > 0) ...[
-            _buildKpiCard('Pending DSM', dsmPending.toString(), Icons.admin_panel_settings_rounded, const Color(0xFFC084FC)),
-            const SizedBox(width: 8),
-          ],
-          _buildKpiCard('Approved', approved.toString(), Icons.check_circle_rounded, const Color(0xFF10B981)),
-          const SizedBox(width: 8),
-          _buildKpiCard('Action Req.', rejected.toString(), Icons.cancel_rounded, const Color(0xFFEF4444)),
-          const SizedBox(width: 8),
-          _buildKpiCard('Total Sent', total.toString(), Icons.domain_rounded, const Color(0xFF38BDF8)),
-        ],
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
       ),
-    );
-  }
-
-  Widget _buildKpiCard(String label, String value, IconData icon, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E293B),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withOpacity(0.3), width: 1),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 18),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10, fontWeight: FontWeight.w500),
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSearchAndFilters(int pending, int dsmPending, int approved, int rejected, bool isManager) {
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Search box
-          Container(
-            height: 42,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
-            child: TextField(
-              controller: _searchController,
-              onChanged: (val) => setState(() => _searchQuery = val),
-              decoration: InputDecoration(
-                hintText: isManager ? 'Search all submitted facilities...' : 'Search my submitted facilities...',
-                hintStyle: const TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
-                prefixIcon: const Icon(Icons.search, size: 20, color: Color(0xFF64748B)),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18, color: Color(0xFF64748B)),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _searchQuery = '');
-                        },
-                      )
-                    : null,
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 11),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-
-          // Status Tabs
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _buildFilterChip('All', null),
-                const SizedBox(width: 8),
-                _buildFilterChip('Pending Approval', pending),
-                if (isManager || dsmPending > 0) ...[
-                  const SizedBox(width: 8),
-                  _buildFilterChip('Pending DSM Approval', dsmPending),
-                ],
-                const SizedBox(width: 8),
-                _buildFilterChip('Approved', approved),
-                const SizedBox(width: 8),
-                _buildFilterChip('Rejected', rejected),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFilterChip(String label, int? count) {
-    final isSelected = _selectedFilter == label;
-    return InkWell(
-      onTap: () => setState(() => _selectedFilter = label),
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF0066FF) : const Color(0xFFF1F5F9),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isSelected ? const Color(0xFF0066FF) : const Color(0xFFCBD5E1),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: isSelected ? Colors.white : const Color(0xFF334155),
-                fontSize: 12,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-              ),
-            ),
-            if (count != null) ...[
-              const SizedBox(width: 5),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                decoration: BoxDecoration(
-                  color: isSelected ? Colors.white.withOpacity(0.25) : const Color(0xFFE2E8F0),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  count.toString(),
-                  style: TextStyle(
-                    color: isSelected ? Colors.white : const Color(0xFF475569),
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
+          // Balanced Search Box (spaced cleanly top-left)
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 14),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440, minWidth: 220),
+              child: SizedBox(
+                height: 40,
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: (val) => setState(() => _searchQuery = val),
+                  textAlignVertical: TextAlignVertical.center,
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A)),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: isManager
+                        ? 'Search all submitted facilities...'
+                        : 'Search my submitted facilities...',
+                    hintStyle: const TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
+                    prefixIcon: const Icon(Icons.search, size: 19, color: Color(0xFF64748B)),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 17, color: Color(0xFF64748B)),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _searchQuery = '');
+                            },
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: const Color(0xFFF8FAFC),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFF0066FF), width: 1.5),
+                    ),
                   ),
                 ),
               ),
-            ],
-          ],
-        ),
+            ),
+          ),
+
+          // Centered 5 Status Tabs with colored outline hover & active state
+          Center(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildFilterChip('All', totalCount, const Color(0xFF0066FF)),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Pending Approval', pending, const Color(0xFFF59E0B)),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Pending DSM Approval', dsmPending, const Color(0xFF9333EA)),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Approved', approved, const Color(0xFF10B981)),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Rejected', rejected, const Color(0xFFEF4444)),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
+    );
+  }
+
+  Widget _buildFilterChip(String label, int? count, Color accentColor) {
+    return _HoverableStatusTab(
+      label: label,
+      count: count,
+      accentColor: accentColor,
+      isSelected: _selectedFilter == label,
+      onTap: () => setState(() => _selectedFilter = label),
     );
   }
 
@@ -1456,11 +1388,12 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
 
   Widget _buildInstitutionCard(Institution inst, bool isManager) {
     final api = Provider.of<ApiService>(context, listen: false);
-    Color badgeBg;
-    Color badgeBorder;
-    Color badgeText;
-    String badgeLabel;
-    IconData badgeIcon;
+    final bool canEditInstitution = api.isSfe || api.isAdmin;
+    Color badgeBg = Colors.transparent;
+    Color badgeBorder = Colors.transparent;
+    Color badgeText = Colors.transparent;
+    String? badgeLabel;
+    IconData badgeIcon = Icons.info_outline;
 
     if (inst.workflowState == 'Pending DSM Approval') {
       badgeBg = const Color(0xFFF3E8FF);
@@ -1480,12 +1413,6 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
       badgeText = const Color(0xFFB91C1C);
       badgeLabel = 'Rejected by SFE';
       badgeIcon = Icons.cancel_rounded;
-    } else {
-      badgeBg = const Color(0xFFFEF3C7);
-      badgeBorder = const Color(0xFFFCD34D);
-      badgeText = const Color(0xFFB45309);
-      badgeLabel = 'Awaiting SFE Review';
-      badgeIcon = Icons.hourglass_top_rounded;
     }
 
     return Card(
@@ -1517,23 +1444,25 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A)),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: badgeBg,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: badgeBorder),
+                if (badgeLabel != null) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: badgeBg,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: badgeBorder),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(badgeIcon, size: 12, color: badgeText),
+                        const SizedBox(width: 4),
+                        Text(badgeLabel, style: TextStyle(color: badgeText, fontSize: 11, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(badgeIcon, size: 12, color: badgeText),
-                      const SizedBox(width: 4),
-                      Text(badgeLabel, style: TextStyle(color: badgeText, fontSize: 11, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                ),
+                ],
               ],
             ),
             const SizedBox(height: 6),
@@ -1743,64 +1672,35 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
                 ),
               ] else ...[
                 Row(
-                  children: const [
-                    Icon(Icons.hourglass_bottom_rounded, color: Color(0xFF7E22CE), size: 16),
-                    SizedBox(width: 6),
-                    Expanded(
+                  children: [
+                    const Icon(Icons.hourglass_bottom_rounded, color: Color(0xFF7E22CE), size: 16),
+                    const SizedBox(width: 6),
+                    const Expanded(
                       child: Text(
                         'SFE Specialist approved this facility. Awaiting DSM final approval with doctor submission.',
                         style: TextStyle(color: Color(0xFF7E22CE), fontSize: 11.5, fontWeight: FontWeight.w500),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF0B192C),
+                        side: const BorderSide(color: Color(0xFFCBD5E1)),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
+                      icon: const Icon(Icons.history_edu_rounded, size: 14, color: Color(0xFF0B192C)),
+                      label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                    ),
                   ],
                 ),
               ],
             ] else if (inst.isRejected) ...[
-              if (inst.resubmissionCount >= 2) ...[
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF2F2),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFFCA5A5)),
-                  ),
-                  child: Row(
-                    children: const [
-                      Icon(Icons.phone_in_talk_rounded, color: Color(0xFFDC2626), size: 16),
-                      SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'Recommendation: Maximum resubmissions reached (2/2). Please call or contact your SFE Specialist directly.',
-                          style: TextStyle(color: Color(0xFF991B1B), fontSize: 11, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ] else ...[
+              if (!canEditInstitution) ...[
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    if (api.isSfe || api.isAdmin) ...[
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0066FF),
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        onPressed: () async {
-                          final changed = await RemapInstitutionDialog.show(context, inst);
-                          if (changed == true) {
-                            _loadData();
-                          }
-                        },
-                        icon: const Icon(Icons.swap_horiz_rounded, size: 15),
-                        label: const Text('Change / Remap', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: const Color(0xFF0B192C),
@@ -1810,7 +1710,80 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
                       ),
                       onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
                       icon: const Icon(Icons.history_edu_rounded, size: 15, color: Color(0xFF0B192C)),
-                      label: const Text('Audit Trail', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                      label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                    ),
+                  ],
+                ),
+              ] else if (inst.resubmissionCount >= 2) ...[
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFFFCA5A5)),
+                      ),
+                      child: Row(
+                        children: const [
+                          Icon(Icons.phone_in_talk_rounded, color: Color(0xFFDC2626), size: 16),
+                          SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Recommendation: Maximum resubmissions reached (2/2). Please call or contact your SFE Specialist directly.',
+                              style: TextStyle(color: Color(0xFF991B1B), fontSize: 11, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF0B192C),
+                        side: const BorderSide(color: Color(0xFFCBD5E1)),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
+                      icon: const Icon(Icons.history_edu_rounded, size: 15, color: Color(0xFF0B192C)),
+                      label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                    ),
+                  ],
+                ),
+              ] else ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0066FF),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () async {
+                        final changed = await RemapInstitutionDialog.show(context, inst);
+                        if (changed == true) {
+                          _loadData();
+                        }
+                      },
+                      icon: const Icon(Icons.swap_horiz_rounded, size: 15),
+                      label: const Text('Change / Remap', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF0B192C),
+                        side: const BorderSide(color: Color(0xFFCBD5E1)),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
+                      icon: const Icon(Icons.history_edu_rounded, size: 15, color: Color(0xFF0B192C)),
+                      label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
                     ),
                     const SizedBox(width: 8),
                     if (inst.isCooldownActive)
@@ -1875,72 +1848,67 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
                     ),
                     onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
                     icon: const Icon(Icons.history_edu_rounded, size: 14, color: Color(0xFF0B192C)),
-                    label: const Text('Audit Trail', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                    label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                   ),
                 ],
               ),
             ] else ...[
               Row(
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  const Icon(Icons.info_outline, color: Color(0xFFF59E0B), size: 16),
-                  const SizedBox(width: 6),
-                  const Expanded(
-                    child: Text(
-                      'For SFE Approval: Awaiting SFE Specialist review.',
-                      style: TextStyle(color: Color(0xFFD97706), fontSize: 11.5, fontWeight: FontWeight.w500),
-                    ),
-                  ),
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF0B192C),
                       side: const BorderSide(color: Color(0xFFCBD5E1)),
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                     onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
                     icon: const Icon(Icons.history_edu_rounded, size: 14, color: Color(0xFF0B192C)),
-                    label: const Text('Audit Trail', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                    label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                   ),
-                  const SizedBox(width: 6),
-                  if (inst.isCooldownActive)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEF3C7),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFFFCD34D)),
+                  if (canEditInstitution) ...[
+                    const SizedBox(width: 6),
+                    if (inst.isCooldownActive)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF3C7),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFFFCD34D)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(
+                              width: 10,
+                              height: 10,
+                              child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFFB45309)),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              inst.editingUser != null
+                                  ? 'Being edited by ${inst.editingUser} (${inst.cooldownRemainingSeconds}s)'
+                                  : 'Active Edit (${inst.cooldownRemainingSeconds}s)',
+                              style: const TextStyle(fontSize: 10.5, color: Color(0xFF92400E), fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0B192C),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        ),
+                        onPressed: () => _openEditAndResubmitDialog(inst),
+                        icon: const Icon(Icons.edit, size: 13, color: Color(0xFF38BDF8)),
+                        label: const Text('Edit', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const SizedBox(
-                            width: 10,
-                            height: 10,
-                            child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFFB45309)),
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            inst.editingUser != null
-                                ? 'Being edited by ${inst.editingUser} (${inst.cooldownRemainingSeconds}s)'
-                                : 'Active Edit (${inst.cooldownRemainingSeconds}s)',
-                            style: const TextStyle(fontSize: 10.5, color: Color(0xFF92400E), fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-                    )
-                  else
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0B192C),
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      ),
-                      onPressed: () => _openEditAndResubmitDialog(inst),
-                      icon: const Icon(Icons.edit, size: 13, color: Color(0xFF38BDF8)),
-                      label: const Text('Edit', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                    ),
+                  ],
                 ],
               ),
             ],
@@ -1970,6 +1938,106 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
               textAlign: TextAlign.center,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HoverableStatusTab extends StatefulWidget {
+  final String label;
+  final int? count;
+  final Color accentColor;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _HoverableStatusTab({
+    required this.label,
+    required this.count,
+    required this.accentColor,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  State<_HoverableStatusTab> createState() => _HoverableStatusTabState();
+}
+
+class _HoverableStatusTabState extends State<_HoverableStatusTab> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool highlighted = widget.isSelected || _isHovered;
+    final Color borderColor =
+        highlighted ? widget.accentColor : const Color(0xFFCBD5E1);
+    final Color bgColor = widget.isSelected
+        ? widget.accentColor.withOpacity(0.12)
+        : (_isHovered
+            ? widget.accentColor.withOpacity(0.06)
+            : const Color(0xFFF8FAFC));
+    final Color textColor =
+        highlighted ? widget.accentColor : const Color(0xFF334155);
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: widget.onTap,
+          borderRadius: BorderRadius.circular(20),
+          hoverColor: Colors.transparent,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: borderColor,
+                width: widget.isSelected ? 1.8 : (_isHovered ? 1.6 : 1.0),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 12,
+                    fontWeight:
+                        widget.isSelected ? FontWeight.w700 : FontWeight.w600,
+                  ),
+                ),
+                if (widget.count != null) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                    decoration: BoxDecoration(
+                      color: highlighted
+                          ? widget.accentColor.withOpacity(0.16)
+                          : const Color(0xFFE2E8F0),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      widget.count.toString(),
+                      style: TextStyle(
+                        color: highlighted
+                            ? widget.accentColor
+                            : const Color(0xFF475569),
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );

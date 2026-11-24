@@ -1,10 +1,10 @@
 {
   "version": "v.1.0.0",
   "build_number": 1,
-  "release_date": "2026-11-23",
+  "release_date": "2026-11-24",
   "application_id": "com.pims.hcpnexus",
   "namespace": "com.pims.hcpnexus",
-  "min_sdk": 23,
+  "min_sdk": 24,
   "target_sdk": 36,
   "compile_sdk": 36,
   "full_version": "v.1.0.0+1",
@@ -13,9 +13,10 @@
   "web_installer_exe": "Territory_Reconfiguration_Setup.exe",
   "web_installer_zip": "Territory_Reconfiguration_Setup.zip",
   "highlights": [
-    "Production Google Play Store Console release baseline (com.pims.hcpnexus, versionCode=1, versionName=1.0.0)",
-    "Targeted at Android API 36 (compileSdk=36, targetSdk=36) with minSdk=23 support and 16 KB ELF page alignment",
-    "Signed with production upload keystore (pims_hcp_upload) and packaged with stripped native debug symbols (.sym) in BUNDLE-METADATA",
-    "Includes all HCP Profiling App offline-first workflows, bidirectional SFE institution approval sync, and Territory Reconfiguration Portal parity"
+    "Initial TestFlight iOS UAT baseline (v.1.0.0+1) targeting Staging UAT with full 1,328 ERPNext Institution pagination",
+    "Compact static responsive PaginatedFooterBar across HCP Masterlist, HCP Account, and Institution Directory",
+    "Clean Institution Submissions & Institution Directory headers/tabs with centered status pills and SFE/Admin-only direct edit restrictions",
+    "Structured Institution Audit Log dialog with Facility Overview and chronological Activity Timeline",
+    "Targeted at Android API 36 (compileSdk=36, targetSdk=36) with minSdk=24 support and synchronized Territory Reconfiguration Portal parity"
   ]
 }

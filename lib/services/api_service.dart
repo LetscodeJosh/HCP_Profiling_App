@@ -1152,24 +1152,81 @@ class ApiService extends ChangeNotifier {
         return [];
       }
     }
-    final wildcardUrl = Uri.parse(
-      '$baseUrl/api/resource/Institution?fields=["*","name","institution_name","region_name","province_name","city_municipality","workflow_state","rejection_reason","owner","creation","modified","docstatus","ownership","institution_type","service_capability"]&order_by=name%20desc&limit_page_length=0',
-    );
-    final coreFallbackUrl = Uri.parse(
-      '$baseUrl/api/resource/Institution?fields=["name","institution_name","region_name","province_name","city_municipality","workflow_state","rejection_reason","owner","creation","modified","docstatus","ownership","institution_type","service_capability"]&order_by=name%20desc&limit_page_length=0',
-    );
+    const int pageSize = 500;
+    final List<Uri Function(int offset)> queryTiers = [
+      (offset) => Uri.parse(
+            '$baseUrl/api/resource/Institution?fields=["*"]&order_by=name%20desc&limit_start=$offset&limit_page_length=$pageSize',
+          ),
+      (offset) => Uri.parse(
+            '$baseUrl/api/resource/Institution?fields=["name","institution_name","region_name","province_name","city_municipality","workflow_state","owner","creation","modified","docstatus"]&order_by=name%20desc&limit_start=$offset&limit_page_length=$pageSize',
+          ),
+      (offset) => Uri.parse(
+            '$baseUrl/api/method/frappe.client.get_list?doctype=Institution&fields=["*"]&order_by=name%20desc&limit_start=$offset&limit_page_length=$pageSize',
+          ),
+    ];
+
     try {
-      http.Response response = await http.get(wildcardUrl, headers: _headers);
-      if (response.statusCode != 200) {
-        response = await http.get(coreFallbackUrl, headers: _headers);
+      final Map<String, Map<String, dynamic>> uniqueByName = {};
+      bool fetchedAny = false;
+      int? lastStatusCode;
+
+      for (final buildUrl in queryTiers) {
+        int offset = 0;
+        bool tierSucceeded = false;
+
+        while (true) {
+          final response = await http
+              .get(buildUrl(offset), headers: _headers)
+              .timeout(const Duration(seconds: 15));
+          lastStatusCode = response.statusCode;
+          if (response.statusCode != 200) {
+            break;
+          }
+
+          final body = jsonDecode(response.body);
+          final List<dynamic> rawList = (body['data'] is List)
+              ? body['data'] as List<dynamic>
+              : (body['message'] is List
+                  ? body['message'] as List<dynamic>
+                  : const []);
+          tierSucceeded = true;
+
+          int addedInPage = 0;
+          for (final item in rawList) {
+            if (item is Map) {
+              final map = Map<String, dynamic>.from(item);
+              final key = (map['name'] ?? '').toString();
+              if (key.isEmpty || !uniqueByName.containsKey(key)) {
+                uniqueByName[key.isNotEmpty ? key : '__row_${uniqueByName.length}'] = map;
+                addedInPage++;
+              }
+            }
+          }
+
+          if (rawList.isEmpty || addedInPage == 0) {
+            break;
+          }
+          offset += rawList.length;
+          if (offset >= 25000) {
+            break;
+          }
+          // Stop cleanly when server returned fewer rows than requested,
+          // unless the server appears to apply a small 20/100 page cap.
+          if (rawList.length < pageSize &&
+              rawList.length != 20 &&
+              rawList.length != 100) {
+            break;
+          }
+        }
+
+        if (tierSucceeded) {
+          fetchedAny = true;
+          break;
+        }
       }
-      if (response.statusCode == 200) {
-        final body = jsonDecode(response.body);
-        final List<dynamic> rawList = body['data'] ?? [];
-        final List<Map<String, dynamic>> dataList = rawList
-            .whereType<Map>()
-            .map((m) => Map<String, dynamic>.from(m))
-            .toList();
+
+      if (fetchedAny) {
+        final List<Map<String, dynamic>> dataList = uniqueByName.values.toList();
 
         // Hydrate PIMS_META & Audit Trail from Frappe Comment doctype (ensures 100% sync with SFE Web Portal)
         try {
@@ -1262,7 +1319,7 @@ class ApiService extends ChangeNotifier {
         notifyListeners();
         return list;
       } else {
-        throw Exception('Server returned ${response.statusCode}');
+        throw Exception('Server returned ${lastStatusCode ?? 'error'}');
       }
     } catch (e) {
       AppLogger.d('ApiService', 'Fetch institutions API error, loading local cached fallback: $e');

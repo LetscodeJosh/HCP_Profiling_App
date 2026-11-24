@@ -353,7 +353,6 @@ class AppDrawer extends StatelessWidget {
                       context,
                       icon: Icons.assignment_turned_in_rounded,
                       title: 'HCP Profile Submissions',
-                      badge: 'Active',
                       isSelected: currentItem == DrawerItem.submissionsFact,
                       onTap: () {
                         Navigator.of(context).pop();
@@ -369,7 +368,6 @@ class AppDrawer extends StatelessWidget {
                       context,
                       icon: Icons.domain_verification_rounded,
                       title: 'Institution Submission',
-                      subtitle: 'Track & Resubmit',
                       badge: (apiService.isSfe || apiService.isAdmin)
                           ? (apiService.pendingInstitutionApprovalsCount > 0
                               ? '${apiService.pendingInstitutionApprovalsCount} Pending'
@@ -394,7 +392,6 @@ class AppDrawer extends StatelessWidget {
                       context,
                       icon: Icons.business_rounded,
                       title: 'Institution Directory',
-                      subtitle: 'Master Reference',
                       isSelected: currentItem == DrawerItem.institutions,
                       onTap: () {
                         Navigator.of(context).pop();

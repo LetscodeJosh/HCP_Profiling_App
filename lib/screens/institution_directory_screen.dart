@@ -5,7 +5,6 @@ import '../models/lookup_models.dart';
 import '../services/api_service.dart';
 import 'components/app_drawer.dart';
 import 'components/paginated_footer_bar.dart';
-import 'institution_approvals_screen.dart';
 
 class _InstitutionSearchEntry {
   final Institution inst;
@@ -248,18 +247,9 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
       appBar: AppBar(
         backgroundColor: const Color(0xFF0B192C),
         elevation: 0,
-        title: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Institution Directory',
-              style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              'Master Healthcare Facilities Reference',
-              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-            ),
-          ],
+        title: const Text(
+          'Institution Directory',
+          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
         ),
         actions: [
           IconButton(
@@ -269,16 +259,6 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
           ),
 
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: const Color(0xFF0066FF),
-        icon: const Icon(Icons.add_business_rounded, color: Colors.white, size: 20),
-        label: const Text('Propose Institution', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-        onPressed: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const InstitutionApprovalsScreen()),
-          );
-        },
       ),
       body: RefreshIndicator(
         onRefresh: _loadData,
@@ -301,7 +281,7 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
                       ? _buildEmptyState()
                       : ListView.separated(
                           controller: _listScrollController,
-                          padding: const EdgeInsets.only(left: 12, right: 12, top: 6, bottom: 80),
+                          padding: const EdgeInsets.only(left: 12, right: 12, top: 6, bottom: 16),
                           itemCount: visibleInstitutions.length,
                           separatorBuilder: (_, __) => const SizedBox(height: 6),
                           itemBuilder: (ctx, idx) {
