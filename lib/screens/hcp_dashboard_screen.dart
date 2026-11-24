@@ -298,13 +298,25 @@ class _HcpDashboardScreenState extends State<HcpDashboardScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0B192C),
         elevation: 0,
-        title: const Text(
-          'HCP Dashboard',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-            fontSize: 18,
-          ),
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'HCP Nexus',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+                fontSize: 17,
+              ),
+            ),
+            Text(
+              'HCP Dashboard',
+              style: TextStyle(
+                color: Color(0xFF94A3B8),
+                fontSize: 11,
+              ),
+            ),
+          ],
         ),
         actions: [
           // Position Role Badge

@@ -222,7 +222,7 @@ class _TerritoryPortalLauncherScreenState extends State<TerritoryPortalLauncherS
                               ),
                               const SizedBox(height: 3),
                               Text(
-                                'Self-Hosted Directly Inside HCP Profiling',
+                                'Self-Hosted Directly Inside HCP Nexus',
                                 style: TextStyle(
                                   color: const Color(0xFF38BDF8).withOpacity(0.9),
                                   fontSize: 12,

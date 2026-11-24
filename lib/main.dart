@@ -26,7 +26,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'HCP Profiling',
+      title: 'HCP Nexus',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.light,

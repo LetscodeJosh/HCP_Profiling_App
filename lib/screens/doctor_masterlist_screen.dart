@@ -9,6 +9,25 @@ import '../models/submission.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import 'components/app_drawer.dart';
+import 'components/paginated_footer_bar.dart';
+
+class _DoctorSearchEntry {
+  final String idLower;
+  final String fullNameLower;
+  final String searchNameLower;
+  final String institutionLower;
+  final String nameSortKey;
+  final List<String> nameTokens;
+
+  const _DoctorSearchEntry({
+    required this.idLower,
+    required this.fullNameLower,
+    required this.searchNameLower,
+    required this.institutionLower,
+    required this.nameSortKey,
+    required this.nameTokens,
+  });
+}
 
 class DoctorMasterlistScreen extends StatefulWidget {
   const DoctorMasterlistScreen({Key? key}) : super(key: key);
@@ -20,6 +39,9 @@ class DoctorMasterlistScreen extends StatefulWidget {
 class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
   List<Hcp> _allDoctors = [];
   List<Hcp> _filteredDoctors = [];
+  final Map<Hcp, _DoctorSearchEntry> _doctorSearchIndex =
+      Map<Hcp, _DoctorSearchEntry>.identity();
+  Map<String, String> _typeLabelById = const {};
   List<Institution> _institutions = [];
   List<Specialization> _specializations = [];
   List<HcpType> _hcpTypes = [];
@@ -39,10 +61,50 @@ class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
   String _sortBy = 'Name of Doctor';
   bool _isAscending = true;
 
+  // Indexed pagination state (matching web app preview)
+  int _currentPage = 1;
+  int _pageSize = 20;
+  final ScrollController _listScrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _listScrollController.dispose();
+    super.dispose();
+  }
+
+  void _rebuildDoctorIndex() {
+    _doctorSearchIndex.clear();
+    final wsRegex = RegExp(r'\s+');
+    for (final doctor in _allDoctors) {
+      final fullLower = doctor.fullName.toLowerCase().trim();
+      _doctorSearchIndex[doctor] = _DoctorSearchEntry(
+        idLower: (doctor.name ?? '').toLowerCase(),
+        fullNameLower: fullLower,
+        searchNameLower:
+            '${doctor.firstName} ${doctor.middleName ?? ''} ${doctor.lastName}'
+                .toLowerCase(),
+        institutionLower: (doctor.institution ?? '').toLowerCase(),
+        nameSortKey: '${doctor.firstName} ${doctor.lastName}',
+        nameTokens: fullLower.isEmpty
+            ? const []
+            : fullLower.split(wsRegex).where((t) => t.length > 1).toList(),
+      );
+    }
+    _typeLabelById = {
+      for (final t in _hcpTypes) t.name: t.typeName,
+    };
+  }
+
+  void _scrollToTop() {
+    if (_listScrollController.hasClients) {
+      _listScrollController.jumpTo(0);
+    }
   }
 
   Future<void> _loadData() async {
@@ -78,6 +140,7 @@ class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
           _hcpTypes = types;
           _hcpAccounts = accounts;
           _submissions = subs;
+          _rebuildDoctorIndex();
           _applyFilters();
           _isLoading = false;
         });
@@ -143,6 +206,7 @@ class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
     final nameQueryNorm = _nameQuery.toLowerCase().trim();
 
     setState(() {
+      _currentPage = 1;
       _filteredDoctors = _allDoctors.where((doctor) {
         final matchesType = _selectedTypeFilter == null || _selectedTypeFilter == 'All' || doctor.hcpType == _selectedTypeFilter;
         if (!matchesType) return false;
@@ -151,24 +215,28 @@ class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
         final matchesIsActive = !_onlyIsActive || doctor.isActive;
         if (!matchesIsActive) return false;
 
-        final idStr = (doctor.name ?? '').toLowerCase();
+        final indexed = _doctorSearchIndex[doctor];
+        final idStr = indexed?.idLower ?? (doctor.name ?? '').toLowerCase();
         if (idQueryNorm.isNotEmpty && !idStr.contains(idQueryNorm)) return false;
 
-        final nameStr = '${doctor.firstName} ${doctor.middleName ?? ''} ${doctor.lastName}'.toLowerCase();
+        final nameStr = indexed?.searchNameLower ??
+            '${doctor.firstName} ${doctor.middleName ?? ''} ${doctor.lastName}'.toLowerCase();
+        final instLower = indexed?.institutionLower ?? (doctor.institution ?? '').toLowerCase();
         if (nameQueryNorm.isNotEmpty &&
             !nameStr.contains(nameQueryNorm) &&
-            !(doctor.institution ?? '').toLowerCase().contains(nameQueryNorm)) {
+            !instLower.contains(nameQueryNorm)) {
           return false;
         }
 
         // 1. Program scoping
         if (filterByProg) {
           final dId = idStr.trim();
-          final dFull = doctor.fullName.toLowerCase().trim();
+          final dFull = indexed?.fullNameLower ?? doctor.fullName.toLowerCase().trim();
           bool belongs = (dId.isNotEmpty && progDocIds.contains(dId)) ||
               (dFull.isNotEmpty && progDocNames.contains(dFull));
           if (!belongs && dFull.isNotEmpty) {
-            final docTokens = dFull.split(wsRegex).where((t) => t.length > 1).toList();
+            final docTokens = indexed?.nameTokens ??
+                dFull.split(wsRegex).where((t) => t.length > 1).toList();
             for (final pTokens in progNameTokenSets) {
               int matches = 0;
               for (final t in docTokens) {
@@ -200,8 +268,8 @@ class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
             break;
           case 'Name of Doctor':
           default:
-            final aName = '${a.firstName} ${a.lastName}';
-            final bName = '${b.firstName} ${b.lastName}';
+            final aName = _doctorSearchIndex[a]?.nameSortKey ?? '${a.firstName} ${a.lastName}';
+            final bName = _doctorSearchIndex[b]?.nameSortKey ?? '${b.firstName} ${b.lastName}';
             cmp = aName.compareTo(bName);
             break;
         }
@@ -1397,6 +1465,15 @@ class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
   @override
   Widget build(BuildContext context) {
     final apiService = Provider.of<ApiService>(context);
+    final totalFiltered = _filteredDoctors.length;
+    final totalPages =
+        totalFiltered <= 0 ? 1 : ((totalFiltered + _pageSize - 1) ~/ _pageSize);
+    final safePage = _currentPage.clamp(1, totalPages);
+    final startIdx = totalFiltered == 0 ? 0 : (safePage - 1) * _pageSize;
+    final endIdx =
+        totalFiltered == 0 ? 0 : (startIdx + _pageSize).clamp(0, totalFiltered);
+    final visibleDoctors =
+        totalFiltered == 0 ? const <Hcp>[] : _filteredDoctors.sublist(startIdx, endIdx);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F9), // Soft Light Background for Darkish Blue & White combination
@@ -1546,9 +1623,11 @@ class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
                                       ),
                                       Container(width: 1, color: Colors.white38, margin: const EdgeInsets.symmetric(horizontal: 6)),
                                       SizedBox(
-                                        width: 80,
+                                        width: 110,
                                         child: Text(
-                                          '${_filteredDoctors.length} of ${_allDoctors.length}',
+                                          totalFiltered == 0
+                                              ? '0 of ${_allDoctors.length}'
+                                              : '${startIdx + 1}-$endIdx of $totalFiltered',
                                           style: const TextStyle(color: Colors.white70, fontSize: 11),
                                           textAlign: TextAlign.right,
                                         ),
@@ -1568,7 +1647,9 @@ class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
                                   children: [
                                     const Text('DOCTORS LIST', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                                     Text(
-                                      'Showing ${_filteredDoctors.length} of ${_allDoctors.length}',
+                                      totalFiltered == 0
+                                          ? 'Showing 0 of ${_allDoctors.length}'
+                                          : 'Showing ${startIdx + 1}-$endIdx of $totalFiltered',
                                       style: const TextStyle(color: Colors.white70, fontSize: 11),
                                     ),
                                   ],
@@ -1581,11 +1662,12 @@ class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
                                       child: Text('No doctors match your criteria.', style: TextStyle(color: Color(0xFF64748B))),
                                     )
                                   : ListView.separated(
-                                      padding: const EdgeInsets.symmetric(vertical: 4),
-                                      itemCount: _filteredDoctors.length,
+                                      controller: _listScrollController,
+                                      padding: const EdgeInsets.only(top: 4, bottom: 72),
+                                      itemCount: visibleDoctors.length,
                                       separatorBuilder: (_, __) => const SizedBox(height: 2),
                                       itemBuilder: (ctx, index) {
-                                        final doctor = _filteredDoctors[index];
+                                        final doctor = visibleDoctors[index];
                                         final computedParts = [
                                           if (doctor.firstName.trim().isNotEmpty) doctor.firstName.trim(),
                                           if (doctor.middleName != null && doctor.middleName!.trim().isNotEmpty && doctor.middleName!.trim() != '-') doctor.middleName!.trim(),
@@ -1594,7 +1676,7 @@ class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
                                         final fullName = (doctor.hcpFullName != null && doctor.hcpFullName!.trim().isNotEmpty && !doctor.hcpFullName!.startsWith('HCP-'))
                                             ? doctor.hcpFullName!.trim()
                                             : (computedParts.isNotEmpty ? computedParts : (doctor.name ?? 'Unknown Doctor'));
-                                        final typeLabel = _hcpTypes.firstWhere((t) => t.name == doctor.hcpType, orElse: () => HcpType(name: doctor.hcpType, typeName: doctor.hcpType)).typeName;
+                                        final typeLabel = _typeLabelById[doctor.hcpType] ?? doctor.hcpType;
 
                                         final prefDocWorkplaces = doctor.workplaces.where((w) => w.isPrimary).toList();
                                         final String instDisplay = prefDocWorkplaces.isNotEmpty
@@ -1814,6 +1896,25 @@ class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
                 ],
               ),
       ),
+      bottomNavigationBar: _isLoading
+          ? null
+          : PaginatedFooterBar(
+              currentPage: safePage,
+              pageSize: _pageSize,
+              totalItems: totalFiltered,
+              entityLabel: 'HCPs',
+              onPageChanged: (page) {
+                setState(() => _currentPage = page);
+                _scrollToTop();
+              },
+              onPageSizeChanged: (size) {
+                setState(() {
+                  _pageSize = size;
+                  _currentPage = 1;
+                });
+                _scrollToTop();
+              },
+            ),
       floatingActionButton: apiService.canCreateOrEditDoctor
           ? FloatingActionButton.extended(
               backgroundColor: const Color(0xFF0B192C),

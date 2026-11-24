@@ -86,7 +86,7 @@ android {
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName
         manifestPlaceholders = [
-            appName: "PIMS HCP",
+            appName: "HCP Nexus",
             applicationName: "android.app.Application"
         ]
     }

@@ -13,7 +13,7 @@ import re
 
 # 1. Enterprise Streamlit Page Configuration
 st.set_page_config(
-    page_title="PIMS • Territory Reconfiguration Portal",
+    page_title="HCP Nexus • Territory Reconfiguration Portal",
     page_icon="🗺️",
     layout="wide",
     initial_sidebar_state="collapsed"

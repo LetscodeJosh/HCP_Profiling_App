@@ -5,7 +5,26 @@ import '../models/hcp.dart';
 import '../models/lookup_models.dart';
 import '../services/api_service.dart';
 import 'components/app_drawer.dart';
+import 'components/paginated_footer_bar.dart';
 import 'hcp_wizard_screen.dart';
+
+class _AccountSearchEntry {
+  final String idLower;
+  final String nameLower;
+  final String specialtyLower;
+  final String workplaceLower;
+  final String territoryLower;
+  final String displayName;
+
+  const _AccountSearchEntry({
+    required this.idLower,
+    required this.nameLower,
+    required this.specialtyLower,
+    required this.workplaceLower,
+    required this.territoryLower,
+    required this.displayName,
+  });
+}
 
 class DoctorAccountScreen extends StatefulWidget {
   const DoctorAccountScreen({Key? key}) : super(key: key);
@@ -17,6 +36,9 @@ class DoctorAccountScreen extends StatefulWidget {
 class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
   List<HcpAccount> _allAccounts = [];
   List<HcpAccount> _filteredAccounts = [];
+  final Map<HcpAccount, _AccountSearchEntry> _accountSearchIndex =
+      Map<HcpAccount, _AccountSearchEntry>.identity();
+  Map<String, String> _typeLabelById = const {};
   Map<String, Hcp> _doctorsById = {};
   List<HcpType> _hcpTypes = [];
   List<Institution> _institutions = [];
@@ -39,6 +61,11 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
   String? _openedArchiveFolder; // e.g. "September 2026", null = viewing folder directory
   Map<String, List<HcpAccount>> _archivedFolders = {}; // Key: monthLabel, Value: deduplicated accounts
 
+  // Indexed pagination state (matching web app preview)
+  int _currentPage = 1;
+  int _pageSize = 20;
+  final ScrollController _listScrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
@@ -49,6 +76,36 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
       _programFilter = 'All';
     }
     _loadAccounts();
+  }
+
+  @override
+  void dispose() {
+    _listScrollController.dispose();
+    super.dispose();
+  }
+
+  void _rebuildAccountSearchIndex() {
+    _accountSearchIndex.clear();
+    for (final acc in _allAccounts) {
+      final fullName = _getDoctorFullName(acc);
+      _accountSearchIndex[acc] = _AccountSearchEntry(
+        idLower: '${acc.name ?? ''} ${acc.hcp ?? ''}'.toLowerCase(),
+        nameLower: fullName.toLowerCase(),
+        specialtyLower: (acc.specialty ?? '').toLowerCase(),
+        workplaceLower: (acc.workplaceId ?? '').toLowerCase(),
+        territoryLower: (acc.territory ?? '').toLowerCase(),
+        displayName: fullName,
+      );
+    }
+    _typeLabelById = {
+      for (final t in _hcpTypes) t.name: t.typeName,
+    };
+  }
+
+  void _scrollToTop() {
+    if (_listScrollController.hasClients) {
+      _listScrollController.jumpTo(0);
+    }
   }
 
   Future<void> _loadAccounts() async {
@@ -79,6 +136,7 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
         _doctorsById = docMap;
         _hcpTypes = types;
         _institutions = insts;
+        _rebuildAccountSearchIndex();
         _applyFilters();
         _isLoading = false;
       });
@@ -460,6 +518,7 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
   }
 
   void _applyFilters() {
+    _currentPage = 1;
     final apiService = Provider.of<ApiService>(context, listen: false);
 
     // 1. Role-based Program and District Isolation Filter
@@ -492,15 +551,19 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
     // Helper filter for doctor properties (ID, Name, Type, Practice, IsActive)
     bool matchesDoctorFilters(HcpAccount acc) {
       final doc = _getMatchedDoctor(acc);
-      final nameStr = _getDoctorFullName(acc).toLowerCase();
-      final idStr = '${acc.name ?? ''} ${acc.hcp ?? ''}'.toLowerCase();
+      final indexed = _accountSearchIndex[acc];
+      final nameStr = indexed?.nameLower ?? _getDoctorFullName(acc).toLowerCase();
+      final idStr = indexed?.idLower ?? '${acc.name ?? ''} ${acc.hcp ?? ''}'.toLowerCase();
+      final specStr = indexed?.specialtyLower ?? (acc.specialty ?? '').toLowerCase();
+      final wpStr = indexed?.workplaceLower ?? (acc.workplaceId ?? '').toLowerCase();
+      final terrStr = indexed?.territoryLower ?? (acc.territory ?? '').toLowerCase();
 
       final matchesId = idQueryNorm.isEmpty || idStr.contains(idQueryNorm);
       final matchesName = nameQueryNorm.isEmpty ||
           nameStr.contains(nameQueryNorm) ||
-          (acc.specialty ?? '').toLowerCase().contains(nameQueryNorm) ||
-          (acc.workplaceId ?? '').toLowerCase().contains(nameQueryNorm) ||
-          (acc.territory ?? '').toLowerCase().contains(nameQueryNorm);
+          specStr.contains(nameQueryNorm) ||
+          wpStr.contains(nameQueryNorm) ||
+          terrStr.contains(nameQueryNorm);
       final matchesType = _selectedTypeFilter == null || _selectedTypeFilter == 'All' || doc.hcpType == _selectedTypeFilter;
       final matchesPractice = _selectedPracticeFilter == null || _selectedPracticeFilter == 'All' || doc.hcpPractice == _selectedPracticeFilter;
       final matchesIsActive = !_onlyIsActive || doc.isActive;
@@ -624,8 +687,8 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
           break;
         case 'Name of Doctor':
         default:
-          final aName = _getDoctorFullName(a);
-          final bName = _getDoctorFullName(b);
+          final aName = _accountSearchIndex[a]?.displayName ?? _getDoctorFullName(a);
+          final bName = _accountSearchIndex[b]?.displayName ?? _getDoctorFullName(b);
           cmp = aName.compareTo(bName);
           break;
       }
@@ -1832,8 +1895,10 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
                   width: 120,
                   child: TextField(
                     onChanged: (val) {
-                      _idQuery = val;
-                      _applyFilters();
+                      setState(() {
+                        _idQuery = val;
+                        _applyFilters();
+                      });
                     },
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                     decoration: InputDecoration(
@@ -1854,8 +1919,10 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
                   width: 160,
                   child: TextField(
                     onChanged: (val) {
-                      _nameQuery = val;
-                      _applyFilters();
+                      setState(() {
+                        _nameQuery = val;
+                        _applyFilters();
+                      });
                     },
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                     decoration: InputDecoration(
@@ -1974,6 +2041,17 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
   @override
   Widget build(BuildContext context) {
     final apiService = Provider.of<ApiService>(context);
+    final isArchiveDirectory =
+        _selectedCycleFilter == 'Archived / Past' && _openedArchiveFolder == null;
+    final totalFiltered = _filteredAccounts.length;
+    final totalPages =
+        totalFiltered <= 0 ? 1 : ((totalFiltered + _pageSize - 1) ~/ _pageSize);
+    final safePage = _currentPage.clamp(1, totalPages);
+    final startIdx = totalFiltered == 0 ? 0 : (safePage - 1) * _pageSize;
+    final endIdx =
+        totalFiltered == 0 ? 0 : (startIdx + _pageSize).clamp(0, totalFiltered);
+    final visibleAccounts =
+        totalFiltered == 0 ? const <HcpAccount>[] : _filteredAccounts.sublist(startIdx, endIdx);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F9),
@@ -2069,7 +2147,6 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final isMobile = constraints.maxWidth < 650;
-                      final isArchiveDirectory = _selectedCycleFilter == 'Archived / Past' && _openedArchiveFolder == null;
 
                       // Display the monthly folders when in Archive view without a folder open
                       if (isArchiveDirectory) {
@@ -2128,13 +2205,19 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
                                     ),
                                     Container(width: 1, color: Colors.white38, margin: const EdgeInsets.symmetric(horizontal: 6)),
                                     SizedBox(
-                                      width: 80,
+                                      width: 110,
                                       child: Builder(
                                         builder: (_) {
                                           final total = _getProgramTotalCount(apiService);
-                                          final isFiltered = _filteredAccounts.length < total;
+                                          if (totalFiltered == 0) {
+                                            return Text(
+                                              '0 of $total',
+                                              style: const TextStyle(color: Colors.white70, fontSize: 11),
+                                              textAlign: TextAlign.right,
+                                            );
+                                          }
                                           return Text(
-                                            isFiltered ? '${_filteredAccounts.length} of $total' : '$total',
+                                            '${startIdx + 1}-$endIdx of $totalFiltered',
                                             style: const TextStyle(color: Colors.white70, fontSize: 11),
                                             textAlign: TextAlign.right,
                                           );
@@ -2163,11 +2246,10 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
                                   Builder(
                                     builder: (_) {
                                       final total = _getProgramTotalCount(apiService);
-                                      final isFiltered = _filteredAccounts.length < total;
                                       return Text(
-                                        isFiltered
-                                            ? 'Showing ${_filteredAccounts.length} of $total'
-                                            : 'Total: $total Accounts',
+                                        totalFiltered == 0
+                                            ? '0 of $total Accounts'
+                                            : 'Showing ${startIdx + 1}-$endIdx of $totalFiltered',
                                         style: const TextStyle(color: Colors.white70, fontSize: 11),
                                       );
                                     },
@@ -2185,14 +2267,15 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
                                     onRefresh: _loadAccounts,
                                     color: const Color(0xFF0066FF),
                                     child: ListView.separated(
-                                      padding: const EdgeInsets.symmetric(vertical: 4),
-                                      itemCount: _filteredAccounts.length,
+                                      controller: _listScrollController,
+                                      padding: const EdgeInsets.only(top: 4, bottom: 72),
+                                      itemCount: visibleAccounts.length,
                                       separatorBuilder: (_, __) => const SizedBox(height: 2),
                                       itemBuilder: (ctx, index) {
-                                        final item = _filteredAccounts[index];
+                                        final item = visibleAccounts[index];
                                         final doc = _getMatchedDoctor(item);
-                                        final doctorFullName = _getDoctorFullName(item);
-                                        final typeLabel = _hcpTypes.firstWhere((t) => t.name == doc.hcpType, orElse: () => HcpType(name: doc.hcpType, typeName: doc.hcpType)).typeName;
+                                        final doctorFullName = _accountSearchIndex[item]?.displayName ?? _getDoctorFullName(item);
+                                        final typeLabel = _typeLabelById[doc.hcpType] ?? doc.hcpType;
 
                                         // Retain and copy previous month workplace data
                                         final prefInstDisplay = _getEffectiveInstitutionDisplay(item, doc);
@@ -2444,6 +2527,25 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
                   ),
                 ),
               ],
+            ),
+      bottomNavigationBar: (_isLoading || isArchiveDirectory)
+          ? null
+          : PaginatedFooterBar(
+              currentPage: safePage,
+              pageSize: _pageSize,
+              totalItems: totalFiltered,
+              entityLabel: 'HCP accounts',
+              onPageChanged: (page) {
+                setState(() => _currentPage = page);
+                _scrollToTop();
+              },
+              onPageSizeChanged: (size) {
+                setState(() {
+                  _pageSize = size;
+                  _currentPage = 1;
+                });
+                _scrollToTop();
+              },
             ),
       floatingActionButton: (apiService.isAdmin || apiService.isSfe)
           ? FloatingActionButton.extended(

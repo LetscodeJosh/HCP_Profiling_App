@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>PIMS HCP</string>
+	<string>HCP Nexus</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>PIMS HCP</string>
+	<string>HCP Nexus</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -25,13 +25,13 @@
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>PIMS HCP needs location access to geotag profiling records.</string>
+	<string>HCP Nexus needs location access to geotag profiling records.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>PIMS HCP needs camera access to capture geotagged photos.</string>
+	<string>HCP Nexus needs camera access to capture geotagged photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>PIMS HCP needs photo library access to select physician profile and consent images.</string>
+	<string>HCP Nexus needs photo library access to select physician profile and consent images.</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>PIMS HCP requires Face ID access for quick and secure biometric login.</string>
+	<string>HCP Nexus requires Face ID access for quick and secure biometric login.</string>
 	<key>UIFileSharingEnabled</key>
 	<false/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

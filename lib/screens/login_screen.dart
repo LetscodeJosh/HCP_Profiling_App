@@ -354,7 +354,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               const SizedBox(height: 20),
                               // App Title
                               Text(
-                                'HCP Profiling App',
+                                'HCP Nexus',
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(
                                   color: Color(0xFF00458E),

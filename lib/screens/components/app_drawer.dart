@@ -58,7 +58,7 @@ class AppDrawer extends StatelessWidget {
                       width: 48,
                       height: 48,
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: const Color(0xFF0A2259),
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(color: const Color(0xFF38BDF8), width: 1.5),
                         boxShadow: [
@@ -93,7 +93,7 @@ class AppDrawer extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: const [
                           Text(
-                            'HCP Profiling',
+                            'HCP Nexus',
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: 22,

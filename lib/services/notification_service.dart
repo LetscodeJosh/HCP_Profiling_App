@@ -110,7 +110,7 @@ class NotificationService {
         styleInformation: BigTextStyleInformation(
           'Your submitted institution "$institutionName" was REJECTED by SFE.\n\nReason: $cleanReason\n\nThis institution cannot be used for HCP profiling. SFE may correct or remap it.',
           contentTitle: '⚠️ Institution Proposal Rejected',
-          summaryText: 'HCP Profiling Alert',
+          summaryText: 'HCP Nexus Alert',
         ),
       );
 

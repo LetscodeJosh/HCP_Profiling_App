@@ -4,7 +4,32 @@ import 'package:provider/provider.dart';
 import '../models/lookup_models.dart';
 import '../services/api_service.dart';
 import 'components/app_drawer.dart';
+import 'components/paginated_footer_bar.dart';
 import 'institution_approvals_screen.dart';
+
+class _InstitutionSearchEntry {
+  final Institution inst;
+  final String idLower;
+  final String displayNameLower;
+  final String statusLower;
+  final String regionLower;
+  final String provinceLower;
+  final String cityLower;
+  final String creationKey;
+  final String modifiedKey;
+
+  const _InstitutionSearchEntry({
+    required this.inst,
+    required this.idLower,
+    required this.displayNameLower,
+    required this.statusLower,
+    required this.regionLower,
+    required this.provinceLower,
+    required this.cityLower,
+    required this.creationKey,
+    required this.modifiedKey,
+  });
+}
 
 class InstitutionDirectoryScreen extends StatefulWidget {
   const InstitutionDirectoryScreen({Key? key}) : super(key: key);
@@ -28,6 +53,18 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
   final TextEditingController _cityCtrl = TextEditingController();
   String _statusFilter = 'All';
 
+  // Indexed search cache + pagination state
+  int _currentPage = 1;
+  int _pageSize = 20;
+  final ScrollController _listScrollController = ScrollController();
+  int _indexedSourceLen = -1;
+  String _indexedFirstId = '';
+  String _indexedLastId = '';
+  int _indexVersion = 0;
+  List<_InstitutionSearchEntry> _indexedEntries = const [];
+  String _lastFilterSortKey = '';
+  List<Institution> _cachedFilteredSorted = const [];
+
   @override
   void initState() {
     super.initState();
@@ -36,12 +73,19 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
 
   @override
   void dispose() {
+    _listScrollController.dispose();
     _idCtrl.dispose();
     _nameCtrl.dispose();
     _regionCtrl.dispose();
     _provinceCtrl.dispose();
     _cityCtrl.dispose();
     super.dispose();
+  }
+
+  void _scrollToTop() {
+    if (_listScrollController.hasClients) {
+      _listScrollController.jumpTo(0);
+    }
   }
 
   Future<void> _loadData() async {
@@ -51,7 +95,10 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
       await apiService.fetchInstitutions();
     } catch (_) {}
     if (mounted) {
-      setState(() => _isLoading = false);
+      setState(() {
+        _indexedSourceLen = -1; // force index refresh after reload
+        _isLoading = false;
+      });
     }
   }
 
@@ -63,6 +110,7 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
       _provinceCtrl.clear();
       _cityCtrl.clear();
       _statusFilter = 'All';
+      _currentPage = 1;
     });
   }
 
@@ -75,85 +123,104 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
         _cityCtrl.text.trim().isNotEmpty;
   }
 
+  void _ensureIndex(List<Institution> source) {
+    final len = source.length;
+    final firstId = len > 0 ? source.first.name : '';
+    final lastId = len > 0 ? source.last.name : '';
+    if (_indexedSourceLen == len &&
+        _indexedFirstId == firstId &&
+        _indexedLastId == lastId) {
+      return;
+    }
+
+    _indexedEntries = source.map((inst) {
+      final displayName =
+          inst.institutionName.isNotEmpty ? inst.institutionName : inst.name;
+      return _InstitutionSearchEntry(
+        inst: inst,
+        idLower: inst.name.toLowerCase(),
+        displayNameLower: displayName.toLowerCase(),
+        statusLower: inst.status.toLowerCase(),
+        regionLower: (inst.regionName ?? inst.rawRegionName ?? '').toLowerCase(),
+        provinceLower:
+            (inst.provinceName ?? inst.rawProvinceName ?? '').toLowerCase(),
+        cityLower:
+            (inst.cityMunicipality ?? inst.rawCityMunicipality ?? '').toLowerCase(),
+        creationKey: inst.creation ?? '',
+        modifiedKey: inst.modified ?? inst.creation ?? '',
+      );
+    }).toList(growable: false);
+
+    _indexedSourceLen = len;
+    _indexedFirstId = firstId;
+    _indexedLastId = lastId;
+    _indexVersion++;
+    _lastFilterSortKey = '';
+  }
+
   List<Institution> _getFilteredAndSorted(List<Institution> source) {
+    _ensureIndex(source);
+
     final idQ = _idCtrl.text.trim().toLowerCase();
     final nameQ = _nameCtrl.text.trim().toLowerCase();
     final regionQ = _regionCtrl.text.trim().toLowerCase();
     final provQ = _provinceCtrl.text.trim().toLowerCase();
     final cityQ = _cityCtrl.text.trim().toLowerCase();
+    final statusLower = _statusFilter.toLowerCase();
 
-    final filtered = source.where((inst) {
-      // 1. Status Filter (matching ERPNext workflow_state)
-      if (_statusFilter != 'All') {
-        if (inst.status.toLowerCase() != _statusFilter.toLowerCase()) return false;
-      }
+    final filterSortKey =
+        '$idQ|$nameQ|$statusLower|$regionQ|$provQ|$cityQ|$_sortBy|$_isAscending|$_indexVersion';
+    if (_lastFilterSortKey == filterSortKey) {
+      return _cachedFilteredSorted;
+    }
 
-      // 2. ID Filter
-      if (idQ.isNotEmpty && !inst.name.toLowerCase().contains(idQ)) return false;
+    final matchedEntries = <_InstitutionSearchEntry>[];
+    for (final entry in _indexedEntries) {
+      if (_statusFilter != 'All' && entry.statusLower != statusLower) continue;
+      if (idQ.isNotEmpty && !entry.idLower.contains(idQ)) continue;
+      if (nameQ.isNotEmpty && !entry.displayNameLower.contains(nameQ)) continue;
+      if (regionQ.isNotEmpty && !entry.regionLower.contains(regionQ)) continue;
+      if (provQ.isNotEmpty && !entry.provinceLower.contains(provQ)) continue;
+      if (cityQ.isNotEmpty && !entry.cityLower.contains(cityQ)) continue;
+      matchedEntries.add(entry);
+    }
 
-      // 3. Name Filter
-      if (nameQ.isNotEmpty) {
-        final displayName = inst.institutionName.isNotEmpty ? inst.institutionName : inst.name;
-        if (!displayName.toLowerCase().contains(nameQ)) return false;
-      }
-
-      // 4. Region Filter
-      if (regionQ.isNotEmpty) {
-        final reg = (inst.regionName ?? inst.rawRegionName ?? '').toLowerCase();
-        if (!reg.contains(regionQ)) return false;
-      }
-
-      // 5. Province Filter
-      if (provQ.isNotEmpty) {
-        final prov = (inst.provinceName ?? inst.rawProvinceName ?? '').toLowerCase();
-        if (!prov.contains(provQ)) return false;
-      }
-
-      // 6. City / Municipality Filter
-      if (cityQ.isNotEmpty) {
-        final city = (inst.cityMunicipality ?? inst.rawCityMunicipality ?? '').toLowerCase();
-        if (!city.contains(cityQ)) return false;
-      }
-
-      return true;
-    }).toList();
-
-    // Sorting
-    filtered.sort((a, b) {
+    matchedEntries.sort((a, b) {
       int cmp = 0;
       switch (_sortBy) {
         case 'Institution Name':
-          final aName = a.institutionName.isNotEmpty ? a.institutionName : a.name;
-          final bName = b.institutionName.isNotEmpty ? b.institutionName : b.name;
-          cmp = aName.toLowerCase().compareTo(bName.toLowerCase());
+          cmp = a.displayNameLower.compareTo(b.displayNameLower);
           break;
         case 'ID':
-          cmp = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+          cmp = a.idLower.compareTo(b.idLower);
           break;
         case 'Status':
-          cmp = a.status.toLowerCase().compareTo(b.status.toLowerCase());
+          cmp = a.statusLower.compareTo(b.statusLower);
           break;
         case 'Region':
-          cmp = (a.regionName ?? '').toLowerCase().compareTo((b.regionName ?? '').toLowerCase());
+          cmp = a.regionLower.compareTo(b.regionLower);
           break;
         case 'Province':
-          cmp = (a.provinceName ?? '').toLowerCase().compareTo((b.provinceName ?? '').toLowerCase());
+          cmp = a.provinceLower.compareTo(b.provinceLower);
           break;
         case 'City/Municipality':
-          cmp = (a.cityMunicipality ?? '').toLowerCase().compareTo((b.cityMunicipality ?? '').toLowerCase());
+          cmp = a.cityLower.compareTo(b.cityLower);
           break;
         case 'Created On':
-          cmp = (a.creation ?? '').compareTo(b.creation ?? '');
+          cmp = a.creationKey.compareTo(b.creationKey);
           break;
         case 'Last Updated On':
         default:
-          cmp = (a.modified ?? a.creation ?? '').compareTo(b.modified ?? b.creation ?? '');
+          cmp = a.modifiedKey.compareTo(b.modifiedKey);
           break;
       }
       return _isAscending ? cmp : -cmp;
     });
 
-    return filtered;
+    _lastFilterSortKey = filterSortKey;
+    _cachedFilteredSorted =
+        matchedEntries.map((e) => e.inst).toList(growable: false);
+    return _cachedFilteredSorted;
   }
 
   @override
@@ -165,6 +232,15 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
         : apiService.actualInstitutions;
     final filteredList = _getFilteredAndSorted(allInstitutions);
     final totalCount = allInstitutions.length;
+    final totalFiltered = filteredList.length;
+    final totalPages =
+        totalFiltered <= 0 ? 1 : ((totalFiltered + _pageSize - 1) ~/ _pageSize);
+    final safePage = _currentPage.clamp(1, totalPages);
+    final startIdx = totalFiltered == 0 ? 0 : (safePage - 1) * _pageSize;
+    final endIdx =
+        totalFiltered == 0 ? 0 : (startIdx + _pageSize).clamp(0, totalFiltered);
+    final visibleInstitutions =
+        totalFiltered == 0 ? const <Institution>[] : filteredList.sublist(startIdx, endIdx);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -213,7 +289,7 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
             _buildFilterAndSortBar(apiService),
 
             // 2. Table Column Headers
-            _buildTableHeader(filteredList.length, totalCount),
+            _buildTableHeader(totalFiltered, totalCount),
 
             // 3. Aligned Institution Data Rows
             Expanded(
@@ -224,11 +300,12 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
                   : filteredList.isEmpty
                       ? _buildEmptyState()
                       : ListView.separated(
+                          controller: _listScrollController,
                           padding: const EdgeInsets.only(left: 12, right: 12, top: 6, bottom: 80),
-                          itemCount: filteredList.length,
+                          itemCount: visibleInstitutions.length,
                           separatorBuilder: (_, __) => const SizedBox(height: 6),
                           itemBuilder: (ctx, idx) {
-                            final inst = filteredList[idx];
+                            final inst = visibleInstitutions[idx];
                             return _buildAlignedInstitutionRow(inst);
                           },
                         ),
@@ -236,6 +313,25 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
           ],
         ),
       ),
+      bottomNavigationBar: _isLoading
+          ? null
+          : PaginatedFooterBar(
+              currentPage: safePage,
+              pageSize: _pageSize,
+              totalItems: totalFiltered,
+              entityLabel: 'institutions',
+              onPageChanged: (page) {
+                setState(() => _currentPage = page);
+                _scrollToTop();
+              },
+              onPageSizeChanged: (size) {
+                setState(() {
+                  _pageSize = size;
+                  _currentPage = 1;
+                });
+                _scrollToTop();
+              },
+            ),
     );
   }
 
@@ -304,6 +400,7 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
                 onPressed: () {
                   setState(() {
                     _isAscending = !_isAscending;
+                    _currentPage = 1;
                   });
                 },
               ),
@@ -335,6 +432,7 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
                       if (val != null) {
                         setState(() {
                           _sortBy = val;
+                          _currentPage = 1;
                         });
                       }
                     },
@@ -364,7 +462,7 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF334155))),
                         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF334155))),
                       ),
-                      onChanged: (_) => setState(() {}),
+                      onChanged: (_) => setState(() => _currentPage = 1),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -383,7 +481,7 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF334155))),
                         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF334155))),
                       ),
-                      onChanged: (_) => setState(() {}),
+                      onChanged: (_) => setState(() => _currentPage = 1),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -408,7 +506,12 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
                           DropdownMenuItem(value: 'Rejected', child: Text('Rejected')),
                         ],
                         onChanged: (val) {
-                          if (val != null) setState(() => _statusFilter = val);
+                          if (val != null) {
+                            setState(() {
+                              _statusFilter = val;
+                              _currentPage = 1;
+                            });
+                          }
                         },
                       ),
                     ),
@@ -429,7 +532,7 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF334155))),
                         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF334155))),
                       ),
-                      onChanged: (_) => setState(() {}),
+                      onChanged: (_) => setState(() => _currentPage = 1),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -448,7 +551,7 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF334155))),
                         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF334155))),
                       ),
-                      onChanged: (_) => setState(() {}),
+                      onChanged: (_) => setState(() => _currentPage = 1),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -467,7 +570,7 @@ class _InstitutionDirectoryScreenState extends State<InstitutionDirectoryScreen>
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF334155))),
                         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF334155))),
                       ),
-                      onChanged: (_) => setState(() {}),
+                      onChanged: (_) => setState(() => _currentPage = 1),
                     ),
                   ),
                 ],

@@ -5,6 +5,18 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ---
 
+## [v.1.0.1] - 2026-11-24
+### Play Store Staging Release Alignment, Official `HCP Nexus` HD Branding & Indexed Pagination (`1.0.1+2`)
+- **Play Store Console Versioning (`com.pims.hcpnexus`, `staging`)**:
+  - Updated Play Store release versioning to `versionName = 1.0.1` and `versionCode = 2` (`v.1.0.1+2`) targeting `Environment.staging` (`https://staging.pmii-marketing.com`), with `minSdk = 24` and `targetSdk = 36` (`compileSdk = 36`).
+- **Official High-Definition `HCP Nexus` Icon & Unified Header Branding**:
+  - Remastered the official `HN+` icon to 1024x1024 alpha-free HD resolution across Android mipmaps, iOS AppIcon set, Flutter drawer/login assets, Windows portal `.ico`, and embedded Territory Reconfiguration Web App header/login/favicon logos.
+  - Updated application labels and top-level headers to **HCP Nexus** across Android, iOS, Flutter screens, and the Territory Reconfiguration Portal while preserving all active UAT workflows and Web App authentication invariants.
+- **Indexed Search & Web-App-Style Pagination (`20 / 40 / 80 / 100`)**:
+  - Added theme-aligned `PaginatedFooterBar` (`Prev`, page badge, `Next`, range preview, and `Rows per page: 20 | 40 | 80 | 100` segmented pills) across **HCP Masterlist**, **HCP Account**, and **Institution Directory**, backed by pre-lowercased search indices and memoized filtering/sorting to speed up load responsiveness and eliminate frame/OOM pressure on large lists.
+
+---
+
 ## [v.1.1.0] - 2026-11-24
 ### UAT-Staging Build Reconfiguration (`com.pims.hcpnexus`, `1.1.0+2`)
 - **Staging UAT Backend Connectivity**:

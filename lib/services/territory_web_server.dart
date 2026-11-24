@@ -299,7 +299,7 @@ class TerritoryWebServer {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HCP Profiling • Territory Reconfiguration Portal</title>
+<title>HCP Nexus • Territory Reconfiguration Portal</title>
 <style>
   body { background: #0B192C; color: #FFF; font-family: -apple-system, sans-serif; padding: 24px; text-align: center; }
   .card { background: #1E293B; border-radius: 12px; padding: 24px; max-width: 600px; margin: 40px auto; border: 1px solid #334155; }
