@@ -5,6 +5,17 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ---
 
+## [v.1.1.0] - 2026-11-24
+### UAT-Staging Build Reconfiguration (`com.pims.hcpnexus`, `1.1.0+2`)
+- **Staging UAT Backend Connectivity**:
+  - Compiled release artifacts against `Environment.staging` (`https://staging.pmii-marketing.com`) while retaining `v.1.0.0` untouched on `dev` (`dev.pmii-marketing.com`).
+- **Android SDK & Versioning**:
+  - Preserved `namespace` and `applicationId` as `com.pims.hcpnexus`.
+  - Updated `minSdk = 24`, `targetSdk = 36` (`compileSdk = 36`), `versionCode = 2`, and `versionName = 1.1.0` (`1.1.0+2`).
+  - Packaged unsigned Play Store bundle (`pims-hcpnexus-rel-1.1.0_unsigned.aab`, debug signatures stripped for upload keystore signing) and companion release APK (`HCP_Profiling_V.1.1.0.apk`).
+
+---
+
 ## [v.1.0.0] - 2026-11-23
 ### Play Store Production Release & Android Configuration
 - **Google Play Store Reconfiguration (`com.pims.hcpnexus`)**:

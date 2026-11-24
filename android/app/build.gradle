@@ -81,7 +81,7 @@ android {
 
     defaultConfig {
         applicationId = "com.pims.hcpnexus"
-        minSdk = 23 /* Preserve API 23 against Flutter MinSdkVersionMigration */
+        minSdk = 24
         targetSdk = 36
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName

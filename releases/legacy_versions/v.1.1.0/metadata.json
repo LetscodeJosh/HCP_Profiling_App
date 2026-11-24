@@ -1,0 +1,27 @@
+{
+  "version": "v.1.1.0",
+  "build_number": 2,
+  "release_date": "2026-11-24",
+  "environment": "staging",
+  "server_url": "https://staging.pmii-marketing.com",
+  "application_id": "com.pims.hcpnexus",
+  "namespace": "com.pims.hcpnexus",
+  "min_sdk": 24,
+  "target_sdk": 36,
+  "compile_sdk": 36,
+  "full_version": "v.1.1.0+2",
+  "aab_file": "pims-hcpnexus-rel-1.1.0_unsigned.aab",
+  "aab_size_bytes": 59526461,
+  "aab_sha256": "9a3b33f3260d92481f84e2a4ef6bd1351230e3591f80daaca139f29e004b39aa",
+  "apk_file": "HCP_Profiling_V.1.1.0.apk",
+  "apk_size_bytes": 61830525,
+  "apk_sha256": "4d1eee2382f805f1739cd53843215931dc8da3a366a1c525d7a0f5db4a46c8e5",
+  "web_installer_exe": "Territory_Reconfiguration_Setup.exe",
+  "web_installer_zip": "Territory_Reconfiguration_Setup.zip",
+  "highlights": [
+    "UAT-Staging backend release built strictly against Environment.staging (https://staging.pmii-marketing.com); v.1.0.0 retained untouched on dev",
+    "Google Play Store Android App Bundle identity: com.pims.hcpnexus, versionCode=2, versionName=1.1.0, minSdk=24, targetSdk=36, compileSdk=36",
+    "Debug signatures stripped cleanly from pims-hcpnexus-rel-1.1.0_unsigned.aab so senior dev can sign directly with pims-hcp-upload-keystore.jks (pims_hcp_upload)",
+    "Companion Staging release APK (HCP_Profiling_V.1.1.0.apk) and mirrored Territory Reconfiguration Portal v.0.1.3 assets included"
+  ]
+}
