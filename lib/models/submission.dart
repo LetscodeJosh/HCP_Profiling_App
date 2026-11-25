@@ -326,6 +326,7 @@ class HcpProfileSubmission {
         'first_name': fn,
         'middle_name': mn,
         'last_name': ln,
+        'show_hcp_form': 1,
         if (birthDate != null && birthDate!.isNotEmpty) 'birth_date': birthDate,
         'consent_privacy_understood': consentPrivacyUnderstood ? 1 : 0,
         if (consentSignature != null) 'consent_signature': consentSignature,

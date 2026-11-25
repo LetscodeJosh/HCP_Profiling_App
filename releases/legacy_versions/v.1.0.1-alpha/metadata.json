@@ -1,0 +1,22 @@
+{
+  "version": "v.1.0.1-alpha",
+  "build_number": 2,
+  "release_date": "2026-11-25",
+  "application_id": "com.pims.hcpnexus",
+  "namespace": "com.pims.hcpnexus",
+  "min_sdk": 24,
+  "target_sdk": 36,
+  "compile_sdk": 36,
+  "full_version": "v.1.0.1-alpha+2",
+  "aab_file": "pims-hcpnexus-rel-1.0.1-alpha.aab",
+  "apk_file": "HCP_Profiling_V.1.0.1-alpha.apk",
+  "web_installer_exe": "Territory_Reconfiguration_Setup.exe",
+  "web_installer_zip": "Territory_Reconfiguration_Setup.zip",
+  "highlights": [
+    "Staging UAT v.1.0.1-alpha+2 baseline (matched Play Store 1.0.1-alpha/2 and TestFlight numeric 1.0.1/2)",
+    "Fixed ERPNext Step 2 show_hcp_form visibility and removed restricted rejection_reason query field",
+    "Auto-populated Step 3 program questionnaires (Select, Multi-select, Data) with fallback redirect to Changes",
+    "Removed fallback stock doctor image when no photo exists and centered HCP Submission popup tabs",
+    "Aligned Institution Submission 5 colored Web-App card-tabs, lower search placement, and clean compact cards"
+  ]
+}

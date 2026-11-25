@@ -1168,85 +1168,144 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
     int totalCount,
     bool isManager,
   ) {
+    final List<Widget> statusCards = [
+      _buildFilterCard(
+        label: 'All',
+        count: totalCount,
+        bgColor: const Color(0xFFEFF6FF),
+        borderColor: const Color(0xFFBFDBFE),
+        titleColor: const Color(0xFF1D4ED8),
+        countColor: const Color(0xFF1E40AF),
+        accentColor: const Color(0xFF0066FF),
+      ),
+      _buildFilterCard(
+        label: 'Pending Approval',
+        count: pending,
+        bgColor: const Color(0xFFFFFBEB),
+        borderColor: const Color(0xFFFDE68A),
+        titleColor: const Color(0xFFB45309),
+        countColor: const Color(0xFF92400E),
+        accentColor: const Color(0xFFD97706),
+      ),
+      _buildFilterCard(
+        label: 'Pending DSM Approval',
+        count: dsmPending,
+        bgColor: const Color(0xFFF5F3FF),
+        borderColor: const Color(0xFFDDD6FE),
+        titleColor: const Color(0xFF6D28D9),
+        countColor: const Color(0xFF5B21B6),
+        accentColor: const Color(0xFF7C3AED),
+      ),
+      _buildFilterCard(
+        label: 'Approved',
+        count: approved,
+        bgColor: const Color(0xFFECFDF5),
+        borderColor: const Color(0xFFA7F3D0),
+        titleColor: const Color(0xFF047857),
+        countColor: const Color(0xFF065F46),
+        accentColor: const Color(0xFF10B981),
+      ),
+      _buildFilterCard(
+        label: 'Rejected',
+        count: rejected,
+        bgColor: const Color(0xFFFEF2F2),
+        borderColor: const Color(0xFFFECACA),
+        titleColor: const Color(0xFFB91C1C),
+        countColor: const Color(0xFF991B1B),
+        accentColor: const Color(0xFFEF4444),
+      ),
+    ];
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Balanced Search Box (spaced cleanly top-left)
-          Padding(
-            padding: const EdgeInsets.only(left: 4, bottom: 14),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 440, minWidth: 220),
-              child: SizedBox(
-                height: 40,
-                child: TextField(
-                  controller: _searchController,
-                  onChanged: (val) => setState(() => _searchQuery = val),
-                  textAlignVertical: TextAlignVertical.center,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A)),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: isManager
-                        ? 'Search all submitted facilities...'
-                        : 'Search my submitted facilities...',
-                    hintStyle: const TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
-                    prefixIcon: const Icon(Icons.search, size: 19, color: Color(0xFF64748B)),
-                    suffixIcon: _searchQuery.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.clear, size: 17, color: Color(0xFF64748B)),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() => _searchQuery = '');
-                            },
-                          )
-                        : null,
-                    filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFF0066FF), width: 1.5),
-                    ),
+          // 5 Web-App-Style Status Card-Tabs (retaining exact app labels)
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth >= 720) {
+                return Row(
+                  children: [
+                    for (int i = 0; i < statusCards.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 10),
+                      Expanded(child: statusCards[i]),
+                    ],
+                  ],
+                );
+              }
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (int i = 0; i < statusCards.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 10),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(minWidth: 142),
+                        child: statusCards[i],
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+
+          // Search Box positioned BELOW the 5 card-tabs (matching Web App layout)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: SizedBox(
+              height: 38,
+              child: TextField(
+                controller: _searchController,
+                onChanged: (val) => setState(() => _searchQuery = val),
+                textAlignVertical: TextAlignVertical.center,
+                style: const TextStyle(fontSize: 12.5, color: Color(0xFF0F172A)),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: isManager
+                      ? 'Search INST ID, facility name, city, province, region...'
+                      : 'Search my submitted facilities...',
+                  hintStyle: const TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
+                  prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF64748B)),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 17, color: Color(0xFF64748B)),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFF0066FF), width: 1.5),
                   ),
                 ),
-              ),
-            ),
-          ),
-
-          // Centered 5 Status Tabs with colored outline hover & active state
-          Center(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _buildFilterChip('All', totalCount, const Color(0xFF0066FF)),
-                  const SizedBox(width: 8),
-                  _buildFilterChip('Pending Approval', pending, const Color(0xFFF59E0B)),
-                  const SizedBox(width: 8),
-                  _buildFilterChip('Pending DSM Approval', dsmPending, const Color(0xFF9333EA)),
-                  const SizedBox(width: 8),
-                  _buildFilterChip('Approved', approved, const Color(0xFF10B981)),
-                  const SizedBox(width: 8),
-                  _buildFilterChip('Rejected', rejected, const Color(0xFFEF4444)),
-                ],
               ),
             ),
           ),
@@ -1255,10 +1314,22 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
     );
   }
 
-  Widget _buildFilterChip(String label, int? count, Color accentColor) {
+  Widget _buildFilterCard({
+    required String label,
+    required int? count,
+    required Color bgColor,
+    required Color borderColor,
+    required Color titleColor,
+    required Color countColor,
+    required Color accentColor,
+  }) {
     return _HoverableStatusTab(
       label: label,
       count: count,
+      bgColor: bgColor,
+      borderColor: borderColor,
+      titleColor: titleColor,
+      countColor: countColor,
       accentColor: accentColor,
       isSelected: _selectedFilter == label,
       onTap: () => setState(() => _selectedFilter = label),
@@ -1415,8 +1486,79 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
       badgeIcon = Icons.cancel_rounded;
     }
 
+    final bool useInlineActions = inst.workflowState != 'Pending DSM Approval' &&
+        !inst.isApproved &&
+        (!inst.isRejected || !canEditInstitution);
+
+    Widget buildInlineAuditAndEditActions() {
+      return Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        alignment: WrapAlignment.end,
+        children: [
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF0B192C),
+              side: const BorderSide(color: Color(0xFFCBD5E1)),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
+            icon: const Icon(Icons.history_edu_rounded, size: 14, color: Color(0xFF0B192C)),
+            label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+          ),
+          if (canEditInstitution && !inst.isRejected) ...[
+            if (inst.isCooldownActive)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFFCD34D)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(
+                      width: 10,
+                      height: 10,
+                      child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFFB45309)),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      inst.editingUser != null
+                          ? 'Being edited by ${inst.editingUser} (${inst.cooldownRemainingSeconds}s)'
+                          : 'Active Edit (${inst.cooldownRemainingSeconds}s)',
+                      style: const TextStyle(fontSize: 10.5, color: Color(0xFF92400E), fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              )
+            else
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0B192C),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+                ),
+                onPressed: () => _openEditAndResubmitDialog(inst),
+                icon: const Icon(Icons.edit, size: 13, color: Color(0xFF38BDF8)),
+                label: const Text('Edit', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+              ),
+          ],
+        ],
+      );
+    }
+
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 10),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 0,
       color: Colors.white,
@@ -1434,64 +1576,77 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header: Name & Status Badge
+            // Header: Name + Location + ID (left), Badge & Inline Audit/Edit (right)
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: useInlineActions ? CrossAxisAlignment.center : CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: Text(
-                    inst.institutionName,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        inst.institutionName,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A)),
+                      ),
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on_outlined, size: 14, color: Color(0xFF64748B)),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              [
+                                if (inst.cityMunicipality != null && inst.cityMunicipality!.isNotEmpty) inst.cityMunicipality!,
+                                if (inst.provinceName != null && inst.provinceName!.isNotEmpty) inst.provinceName!,
+                                if (inst.regionName != null && inst.regionName!.isNotEmpty) inst.regionName!,
+                              ].join(', '),
+                              style: const TextStyle(color: Color(0xFF475569), fontSize: 12.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (inst.name.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          'ID: ${inst.name}',
+                          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-                if (badgeLabel != null) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: badgeBg,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: badgeBorder),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(badgeIcon, size: 12, color: badgeText),
-                        const SizedBox(width: 4),
-                        Text(badgeLabel, style: TextStyle(color: badgeText, fontSize: 11, fontWeight: FontWeight.bold)),
+                if (badgeLabel != null || useInlineActions) ...[
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (badgeLabel != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: badgeBg,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: badgeBorder),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(badgeIcon, size: 12, color: badgeText),
+                              const SizedBox(width: 4),
+                              Text(badgeLabel, style: TextStyle(color: badgeText, fontSize: 11, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      if (useInlineActions) ...[
+                        if (badgeLabel != null) const SizedBox(height: 6),
+                        buildInlineAuditAndEditActions(),
                       ],
-                    ),
+                    ],
                   ),
                 ],
               ],
             ),
-            const SizedBox(height: 6),
-
-            // Location
-            Row(
-              children: [
-                const Icon(Icons.location_on_outlined, size: 14, color: Color(0xFF64748B)),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    [
-                      if (inst.cityMunicipality != null && inst.cityMunicipality!.isNotEmpty) inst.cityMunicipality!,
-                      if (inst.provinceName != null && inst.provinceName!.isNotEmpty) inst.provinceName!,
-                      if (inst.regionName != null && inst.regionName!.isNotEmpty) inst.regionName!,
-                    ].join(', '),
-                    style: const TextStyle(color: Color(0xFF475569), fontSize: 12.5),
-                  ),
-                ),
-              ],
-            ),
-
-            if (inst.name.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                'ID: ${inst.name}',
-                style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-              ),
-            ],
 
             // Facility Classification & Resubmission tags
             if ((inst.ownership != null && inst.ownership!.isNotEmpty) ||
@@ -1631,57 +1786,198 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
               ),
             ],
 
-            // Action Buttons
-            const SizedBox(height: 12),
-            const Divider(color: Color(0xFFF1F5F9), height: 1),
-            const SizedBox(height: 10),
+            // Action Buttons (only rendered as a bottom section when full-width status/action bars are needed)
+            if (!useInlineActions) ...[
+              const SizedBox(height: 12),
+              const Divider(color: Color(0xFFF1F5F9), height: 1),
+              const SizedBox(height: 10),
 
-            if (inst.workflowState == 'Pending DSM Approval') ...[
-              if (isManager) ...[
+              if (inst.workflowState == 'Pending DSM Approval') ...[
+                if (isManager) ...[
+                  Row(
+                    children: [
+                      const Icon(Icons.admin_panel_settings_rounded, color: Color(0xFF7E22CE), size: 16),
+                      const SizedBox(width: 6),
+                      const Expanded(
+                        child: Text(
+                          'Requires DSM Sign-off',
+                          style: TextStyle(color: Color(0xFF7E22CE), fontSize: 11.5, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFDC2626),
+                          side: const BorderSide(color: Color(0xFFFCA5A5)),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        ),
+                        onPressed: () => _handleDsmReject(inst),
+                        child: const Text('Reject', style: TextStyle(fontSize: 11.5)),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF10B981),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        ),
+                        onPressed: () => _handleDsmApprove(inst),
+                        icon: const Icon(Icons.check_rounded, size: 16),
+                        label: const Text('Approve Facility', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  Row(
+                    children: [
+                      const Icon(Icons.hourglass_bottom_rounded, color: Color(0xFF7E22CE), size: 16),
+                      const SizedBox(width: 6),
+                      const Expanded(
+                        child: Text(
+                          'SFE Specialist approved this facility. Awaiting DSM final approval with doctor submission.',
+                          style: TextStyle(color: Color(0xFF7E22CE), fontSize: 11.5, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF0B192C),
+                          side: const BorderSide(color: Color(0xFFCBD5E1)),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
+                        icon: const Icon(Icons.history_edu_rounded, size: 14, color: Color(0xFF0B192C)),
+                        label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      ),
+                    ],
+                  ),
+                ],
+              ] else if (inst.isRejected) ...[
+                if (inst.resubmissionCount >= 2) ...[
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF2F2),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFFFCA5A5)),
+                        ),
+                        child: Row(
+                          children: const [
+                            Icon(Icons.phone_in_talk_rounded, color: Color(0xFFDC2626), size: 16),
+                            SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Recommendation: Maximum resubmissions reached (2/2). Please call or contact your SFE Specialist directly.',
+                                style: TextStyle(color: Color(0xFF991B1B), fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF0B192C),
+                          side: const BorderSide(color: Color(0xFFCBD5E1)),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
+                        icon: const Icon(Icons.history_edu_rounded, size: 15, color: Color(0xFF0B192C)),
+                        label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0066FF),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () async {
+                          final changed = await RemapInstitutionDialog.show(context, inst);
+                          if (changed == true) {
+                            _loadData();
+                          }
+                        },
+                        icon: const Icon(Icons.swap_horiz_rounded, size: 15),
+                        label: const Text('Change / Remap', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF0B192C),
+                          side: const BorderSide(color: Color(0xFFCBD5E1)),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
+                        icon: const Icon(Icons.history_edu_rounded, size: 15, color: Color(0xFF0B192C)),
+                        label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                      ),
+                      const SizedBox(width: 8),
+                      if (inst.isCooldownActive)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFFCD34D)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFB45309)),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                inst.editingUser != null
+                                    ? 'Being edited by ${inst.editingUser} (${inst.cooldownRemainingSeconds}s)'
+                                    : 'Active Edit in Progress (${inst.cooldownRemainingSeconds}s)',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: Color(0xFF92400E)),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF0B192C),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          ),
+                          onPressed: () => _openEditAndResubmitDialog(inst),
+                          icon: const Icon(Icons.edit_note_rounded, size: 18, color: Color(0xFF38BDF8)),
+                          label: Text('Modify & Resubmit (${inst.resubmissionCount}/2)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                        ),
+                    ],
+                  ),
+                ],
+              ] else if (inst.isApproved) ...[
                 Row(
                   children: [
-                    const Icon(Icons.admin_panel_settings_rounded, color: Color(0xFF7E22CE), size: 16),
+                    const Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 16),
                     const SizedBox(width: 6),
                     const Expanded(
                       child: Text(
-                        'Requires DSM Sign-off',
-                        style: TextStyle(color: Color(0xFF7E22CE), fontSize: 11.5, fontWeight: FontWeight.bold),
+                        'Ready to use: Selectable in doctor profiling.',
+                        style: TextStyle(color: Color(0xFF059669), fontSize: 11.5, fontWeight: FontWeight.w500),
                       ),
                     ),
-                    OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFFDC2626),
-                        side: const BorderSide(color: Color(0xFFFCA5A5)),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      ),
-                      onPressed: () => _handleDsmReject(inst),
-                      child: const Text('Reject', style: TextStyle(fontSize: 11.5)),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF10B981),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      ),
-                      onPressed: () => _handleDsmApprove(inst),
-                      icon: const Icon(Icons.check_rounded, size: 16),
-                      label: const Text('Approve Facility', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                ),
-              ] else ...[
-                Row(
-                  children: [
-                    const Icon(Icons.hourglass_bottom_rounded, color: Color(0xFF7E22CE), size: 16),
-                    const SizedBox(width: 6),
-                    const Expanded(
-                      child: Text(
-                        'SFE Specialist approved this facility. Awaiting DSM final approval with doctor submission.',
-                        style: TextStyle(color: Color(0xFF7E22CE), fontSize: 11.5, fontWeight: FontWeight.w500),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: const Color(0xFF0B192C),
@@ -1696,221 +1992,6 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
                   ],
                 ),
               ],
-            ] else if (inst.isRejected) ...[
-              if (!canEditInstitution) ...[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF0B192C),
-                        side: const BorderSide(color: Color(0xFFCBD5E1)),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
-                      icon: const Icon(Icons.history_edu_rounded, size: 15, color: Color(0xFF0B192C)),
-                      label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
-                    ),
-                  ],
-                ),
-              ] else if (inst.resubmissionCount >= 2) ...[
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEF2F2),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFFFCA5A5)),
-                      ),
-                      child: Row(
-                        children: const [
-                          Icon(Icons.phone_in_talk_rounded, color: Color(0xFFDC2626), size: 16),
-                          SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              'Recommendation: Maximum resubmissions reached (2/2). Please call or contact your SFE Specialist directly.',
-                              style: TextStyle(color: Color(0xFF991B1B), fontSize: 11, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF0B192C),
-                        side: const BorderSide(color: Color(0xFFCBD5E1)),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
-                      icon: const Icon(Icons.history_edu_rounded, size: 15, color: Color(0xFF0B192C)),
-                      label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
-                    ),
-                  ],
-                ),
-              ] else ...[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0066FF),
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () async {
-                        final changed = await RemapInstitutionDialog.show(context, inst);
-                        if (changed == true) {
-                          _loadData();
-                        }
-                      },
-                      icon: const Icon(Icons.swap_horiz_rounded, size: 15),
-                      label: const Text('Change / Remap', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF0B192C),
-                        side: const BorderSide(color: Color(0xFFCBD5E1)),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
-                      icon: const Icon(Icons.history_edu_rounded, size: 15, color: Color(0xFF0B192C)),
-                      label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
-                    ),
-                    const SizedBox(width: 8),
-                    if (inst.isCooldownActive)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFEF3C7),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFFCD34D)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const SizedBox(
-                              width: 12,
-                              height: 12,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFB45309)),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              inst.editingUser != null
-                                  ? 'Being edited by ${inst.editingUser} (${inst.cooldownRemainingSeconds}s)'
-                                  : 'Active Edit in Progress (${inst.cooldownRemainingSeconds}s)',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: Color(0xFF92400E)),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0B192C),
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        ),
-                        onPressed: () => _openEditAndResubmitDialog(inst),
-                        icon: const Icon(Icons.edit_note_rounded, size: 18, color: Color(0xFF38BDF8)),
-                        label: Text('Modify & Resubmit (${inst.resubmissionCount}/2)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
-                      ),
-                  ],
-                ),
-              ],
-            ] else if (inst.isApproved) ...[
-              Row(
-                children: [
-                  const Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 16),
-                  const SizedBox(width: 6),
-                  const Expanded(
-                    child: Text(
-                      'Ready to use: Selectable in doctor profiling.',
-                      style: TextStyle(color: Color(0xFF059669), fontSize: 11.5, fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF0B192C),
-                      side: const BorderSide(color: Color(0xFFCBD5E1)),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
-                    icon: const Icon(Icons.history_edu_rounded, size: 14, color: Color(0xFF0B192C)),
-                    label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                  ),
-                ],
-              ),
-            ] else ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF0B192C),
-                      side: const BorderSide(color: Color(0xFFCBD5E1)),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
-                    icon: const Icon(Icons.history_edu_rounded, size: 14, color: Color(0xFF0B192C)),
-                    label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                  ),
-                  if (canEditInstitution) ...[
-                    const SizedBox(width: 6),
-                    if (inst.isCooldownActive)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFEF3C7),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: const Color(0xFFFCD34D)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const SizedBox(
-                              width: 10,
-                              height: 10,
-                              child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFFB45309)),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              inst.editingUser != null
-                                  ? 'Being edited by ${inst.editingUser} (${inst.cooldownRemainingSeconds}s)'
-                                  : 'Active Edit (${inst.cooldownRemainingSeconds}s)',
-                              style: const TextStyle(fontSize: 10.5, color: Color(0xFF92400E), fontWeight: FontWeight.bold),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0B192C),
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        ),
-                        onPressed: () => _openEditAndResubmitDialog(inst),
-                        icon: const Icon(Icons.edit, size: 13, color: Color(0xFF38BDF8)),
-                        label: const Text('Edit', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                      ),
-                  ],
-                ],
-              ),
             ],
           ],
         ),
@@ -1947,6 +2028,10 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
 class _HoverableStatusTab extends StatefulWidget {
   final String label;
   final int? count;
+  final Color bgColor;
+  final Color borderColor;
+  final Color titleColor;
+  final Color countColor;
   final Color accentColor;
   final bool isSelected;
   final VoidCallback onTap;
@@ -1954,6 +2039,10 @@ class _HoverableStatusTab extends StatefulWidget {
   const _HoverableStatusTab({
     required this.label,
     required this.count,
+    required this.bgColor,
+    required this.borderColor,
+    required this.titleColor,
+    required this.countColor,
     required this.accentColor,
     required this.isSelected,
     required this.onTap,
@@ -1969,15 +2058,6 @@ class _HoverableStatusTabState extends State<_HoverableStatusTab> {
   @override
   Widget build(BuildContext context) {
     final bool highlighted = widget.isSelected || _isHovered;
-    final Color borderColor =
-        highlighted ? widget.accentColor : const Color(0xFFCBD5E1);
-    final Color bgColor = widget.isSelected
-        ? widget.accentColor.withOpacity(0.12)
-        : (_isHovered
-            ? widget.accentColor.withOpacity(0.06)
-            : const Color(0xFFF8FAFC));
-    final Color textColor =
-        highlighted ? widget.accentColor : const Color(0xFF334155);
 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
@@ -1987,51 +2067,52 @@ class _HoverableStatusTabState extends State<_HoverableStatusTab> {
         color: Colors.transparent,
         child: InkWell(
           onTap: widget.onTap,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(10),
           hoverColor: Colors.transparent,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 140),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
             decoration: BoxDecoration(
-              color: bgColor,
-              borderRadius: BorderRadius.circular(20),
+              color: widget.bgColor,
+              borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: borderColor,
-                width: widget.isSelected ? 1.8 : (_isHovered ? 1.6 : 1.0),
+                color: highlighted ? widget.accentColor : widget.borderColor,
+                width: widget.isSelected ? 2.0 : (_isHovered ? 1.5 : 1.0),
               ),
+              boxShadow: highlighted
+                  ? [
+                      BoxShadow(
+                        color: widget.accentColor.withOpacity(widget.isSelected ? 0.18 : 0.12),
+                        blurRadius: widget.isSelected ? 10 : 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                  : const [],
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  widget.label,
+                  widget.label.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: textColor,
-                    fontSize: 12,
-                    fontWeight:
-                        widget.isSelected ? FontWeight.w700 : FontWeight.w600,
+                    color: widget.titleColor,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.4,
                   ),
                 ),
                 if (widget.count != null) ...[
-                  const SizedBox(width: 6),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                    decoration: BoxDecoration(
-                      color: highlighted
-                          ? widget.accentColor.withOpacity(0.16)
-                          : const Color(0xFFE2E8F0),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      widget.count.toString(),
-                      style: TextStyle(
-                        color: highlighted
-                            ? widget.accentColor
-                            : const Color(0xFF475569),
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
+                  const SizedBox(height: 3),
+                  Text(
+                    widget.count.toString(),
+                    style: TextStyle(
+                      color: widget.countColor,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      height: 1.1,
                     ),
                   ),
                 ],

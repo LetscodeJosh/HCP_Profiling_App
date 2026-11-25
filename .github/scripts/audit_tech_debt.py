@@ -108,11 +108,12 @@ def check_version_alignment():
     print(f"  metadata.json:   {meta_ver}")
 
     clean_v = re.sub(r'^[vV]\.?', '', version_str)
+    clean_v_core = clean_v.split('-')[0]
     clean_dart = re.sub(r'^[vV]\.?', '', dart_ver) if dart_ver else None
     clean_pub = pub_ver.split('+')[0] if pub_ver else None
     clean_meta = re.sub(r'^[vV]\.?', '', meta_ver) if meta_ver else None
 
-    if clean_v == clean_dart == clean_pub == clean_meta:
+    if clean_v == clean_dart == clean_meta and clean_pub in (clean_v, clean_v_core):
         print("  --> PASS: Version string is 100% synchronized across all files!")
         return True
     else:

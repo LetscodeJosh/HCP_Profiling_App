@@ -523,15 +523,38 @@ class HcpSurveyTemplate {
   });
 
   factory HcpSurveyTemplate.fromJson(Map<String, dynamic> json) {
+    final dynamic rawActive = json['is_active'];
+    final bool active = rawActive == null
+        ? true
+        : (rawActive == 1 ||
+            rawActive == true ||
+            rawActive.toString().toLowerCase() == 'true' ||
+            rawActive.toString() == '1');
+    final rawName = (json['name'] ?? '').toString().trim();
+    final rawTitle =
+        (json['template_name'] ?? json['title'] ?? rawName).toString().trim();
+    final rawProgram =
+        (json['account_or_program'] ?? json['program'] ?? json['account'])
+            ?.toString()
+            .trim();
+    final dynamic rawQs =
+        json['questions'] ?? json['survey_questions'] ?? json['table_questions'];
+
     return HcpSurveyTemplate(
-      name: json['name'] ?? '',
-      templateName: json['template_name'] ?? '',
-      isActive: json['is_active'] == 1 || json['is_active'] == true,
-      accountOrProgram: json['account_or_program'],
-      description: json['description'],
-      questions: (json['questions'] as List?)
-              ?.map((e) => HcpSurveyQuestion.fromJson(e))
-              .toList() ?? [],
+      name: rawName,
+      templateName: rawTitle.isNotEmpty ? rawTitle : rawName,
+      isActive: active,
+      accountOrProgram:
+          (rawProgram != null && rawProgram.isNotEmpty) ? rawProgram : null,
+      description: json['description']?.toString(),
+      questions: (rawQs is List)
+          ? rawQs
+              .whereType<Map>()
+              .map((e) => HcpSurveyQuestion.fromJson(
+                  Map<String, dynamic>.from(e)))
+              .where((q) => q.question.trim().isNotEmpty)
+              .toList()
+          : [],
     );
   }
 
@@ -560,9 +583,14 @@ class HcpSurveyQuestion {
 
   factory HcpSurveyQuestion.fromJson(Map<String, dynamic> json) {
     return HcpSurveyQuestion(
-      question: json['question'] ?? '',
-      questionType: json['question_type'] ?? 'Data',
-      options: json['options'],
+      question: (json['question'] ?? json['question_text'] ?? json['title'] ?? '')
+          .toString()
+          .trim(),
+      questionType:
+          (json['question_type'] ?? json['fieldtype'] ?? 'Data')
+              .toString()
+              .trim(),
+      options: json['options']?.toString(),
     );
   }
 

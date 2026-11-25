@@ -405,29 +405,50 @@ class _DoctorMasterlistScreenState extends State<DoctorMasterlistScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Doctor Portrait Image Preview Container
-                    Container(
-                      width: 160,
-                      height: 180,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E293B),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFF334155)),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.network(
-                          (fullDoctor.hcpPhoto != null && fullDoctor.hcpPhoto!.isNotEmpty)
-                              ? (fullDoctor.hcpPhoto!.startsWith('http') ? fullDoctor.hcpPhoto! : '${apiService.baseUrl}${fullDoctor.hcpPhoto!}')
-                              : 'https://pngimg.com/uploads/doctor/doctor_PNG16003.png',
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Center(
-                            child: Icon(Icons.person, size: 70, color: Colors.white38),
-                          ),
-                        ),
-                      ),
+                    // Doctor Portrait Image Preview Container (rendered only when an actual photo exists)
+                    Builder(
+                      builder: (context) {
+                        final rawPhoto = (fullDoctor.hcpPhoto ?? '').trim();
+                        final bool hasRealPhoto = rawPhoto.isNotEmpty &&
+                            !rawPhoto.toLowerCase().contains('pngimg.com');
+                        if (!hasRealPhoto) return const SizedBox.shrink();
+                        final String resolvedPhotoUrl =
+                            rawPhoto.startsWith('http')
+                                ? rawPhoto
+                                : '${apiService.baseUrl}$rawPhoto';
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 160,
+                              height: 180,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E293B),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: const Color(0xFF334155),
+                                ),
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  resolvedPhotoUrl,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => const Center(
+                                    child: Icon(
+                                      Icons.person,
+                                      size: 70,
+                                      color: Colors.white38,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                          ],
+                        );
+                      },
                     ),
-                    const SizedBox(height: 20),
                     const Divider(color: Color(0xFF334155)),
                     const SizedBox(height: 12),
 

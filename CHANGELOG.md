@@ -5,6 +5,20 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ---
 
+## [v.1.0.1-alpha] - 2026-11-25
+### Staging UAT Track (`1.0.1-alpha+2`) — Step 2/3 Submission Fixes, No Stock Photo Fallback & Clean UI
+- **Step 2 ERPNext Desk Visibility (`show_hcp_form: 1`) & `rejection_reason` Query Fix**:
+  - Added `'show_hcp_form': 1` to `HcpProfileSubmission.toJson()` and whitelisted it in `ApiService.createSubmission()` & `updateSubmission()` so Step 2 (`DOCTOR'S INFORMATION`) always expands automatically in ERPNext Desk.
+  - Removed restricted `"rejection_reason"` from REST list `fields` in `ApiService.fetchSubmissions()`, eliminating `Field not permitted in query: rejection_reason` errors while keeping defensive Frappe `Comment` rejection-remark enrichment.
+- **Step 3 Program Questionnaire Auto-Population & Auto-Redirect**:
+  - Upgraded `ApiService.fetchSurveyTemplates()` with `fields=["*"]` multi-tier lookup (`frappe.client.get_list` fallback + local `survey_templates_cache.json`), defensive `HcpSurveyTemplate` parsing (`Select`, `Multi-select`, `Data`), case-insensitive/acronym program matching, and automatic redirect from Step 2 → `Changes` whenever no questionnaire is configured for the active program.
+- **UI & Media Refinements**:
+  - Removed the fallback stock doctor image (`pngimg.com`) on Doctor's Information Sheet so portrait attachments only display when a real photo exists.
+  - Centered the 5 workflow tabs (`Step 1`, `Step 2`, `Step 3`, `Others`, `Changes`) in the HCP Profile Submission detail popup.
+  - Aligned **Institution Submission** status tabs with the 5 colored Web App card-tabs (`All`, `Pending Approval`, `Pending DSM Approval`, `Approved`, `Rejected`), moved the search field directly below them, and placed inline `Audit Log` & `Edit` actions on the right to remove unnecessary blank card footers.
+
+---
+
 ## [v.1.0.0] - 2026-11-24
 ### Initial TestFlight iOS UAT Baseline (`1.0.0+1`) — Full 1,328 Institution Sync, Compact Static Pagination & Clean Submission/Audit Log UI
 - **Accurate ERPNext Institution Count (`1,328` Records)**:

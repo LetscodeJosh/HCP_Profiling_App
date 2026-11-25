@@ -4374,7 +4374,7 @@ class ApiService extends ChangeNotifier {
       return [];
     }
 
-    const submissionFields = '["name","owner","creation","modified","docstatus","workflow_state","profile_action","application_status","rejection_reason","hcp_name","hcp_full_name","first_name","middle_name","last_name","hcp_type","hcp_practice","account_or_program","territory","sales_person","user_id","submission_date","hcp_photo","consent_photo","consent_signature","consent_privacy_understood"]';
+    const submissionFields = '["name","owner","creation","modified","docstatus","workflow_state","profile_action","application_status","hcp_name","hcp_full_name","first_name","middle_name","last_name","hcp_type","hcp_practice","account_or_program","territory","sales_person","user_id","submission_date","hcp_photo","consent_photo","consent_signature","consent_privacy_understood"]';
     final encodedFields = Uri.encodeQueryComponent(submissionFields);
     final url = Uri.parse(
       '$baseUrl/api/resource/HCP%20Profile%20Submission?fields=$encodedFields&limit_page_length=0&order_by=creation%20desc',
@@ -4940,6 +4940,7 @@ class ApiService extends ChangeNotifier {
         'first_name',
         'middle_name',
         'last_name',
+        'show_hcp_form',
         'birth_date',
         'hcp_photo',
         'consent_privacy_understood',
@@ -5447,6 +5448,7 @@ class ApiService extends ChangeNotifier {
         'first_name',
         'middle_name',
         'last_name',
+        'show_hcp_form',
         'birth_date',
         'hcp_photo',
         'consent_privacy_understood',
@@ -7065,35 +7067,99 @@ class ApiService extends ChangeNotifier {
     }
   }
 
-  /// Retrieve active Survey Templates
+  /// Retrieve active Survey Templates with multi-tier & cache-aside resilience
   Future<List<HcpSurveyTemplate>> fetchSurveyTemplates() async {
-    final url = Uri.parse(
-      '$baseUrl/api/resource/HCP%20Survey%20Template?fields=["name","template_name","is_active","account_or_program","description"]&filters=[["is_active","=",1]]',
-    );
+    Future<List<HcpSurveyTemplate>> readCachedTemplates() async {
+      final cache = await _readFromCache('survey_templates_cache.json');
+      if (cache != null) {
+        try {
+          final List<dynamic> list = jsonDecode(cache);
+          return list
+              .whereType<Map>()
+              .map((e) => HcpSurveyTemplate.fromJson(
+                  Map<String, dynamic>.from(e)))
+              .where((t) => t.isActive)
+              .toList();
+        } catch (_) {}
+      }
+      return [];
+    }
+
+    if (_isOffline) {
+      return readCachedTemplates();
+    }
+
+    List<dynamic> rawHeaders = [];
     try {
+      final url = Uri.parse(
+        '$baseUrl/api/resource/HCP%20Survey%20Template?fields=["*"]&limit_page_length=200',
+      );
       final response = await http.get(url, headers: _headers);
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
-        final List<dynamic> dataList = body['data'] ?? [];
-        
-        // Survey templates have nested questions child table, we load details for active ones
-        List<HcpSurveyTemplate> templates = [];
-        for (var item in dataList) {
-          final detailUrl = Uri.parse('$baseUrl/api/resource/HCP%20Survey%20Template/${Uri.encodeComponent(item['name'])}');
-          final detailResp = await http.get(detailUrl, headers: _headers);
-          if (detailResp.statusCode == 200) {
-            final detailBody = jsonDecode(detailResp.body);
-            templates.add(HcpSurveyTemplate.fromJson(detailBody['data']));
-          }
+        if (body is Map && body['data'] is List) {
+          rawHeaders = body['data'] as List;
         }
-        return templates;
-      } else {
-        throw Exception('Failed to load survey templates: ${response.statusCode}');
       }
     } catch (e) {
-      AppLogger.d('ApiService', 'Fetch survey templates error: $e');
-      rethrow;
+      AppLogger.d('ApiService', 'Fetch survey templates primary error: $e');
     }
+
+    if (rawHeaders.isEmpty) {
+      try {
+        final rpcUrl = Uri.parse(
+          '$baseUrl/api/method/frappe.client.get_list?doctype=HCP%20Survey%20Template&fields=["*"]&limit_page_length=200',
+        );
+        final rpcResp = await http.get(rpcUrl, headers: _headers);
+        if (rpcResp.statusCode == 200) {
+          final body = jsonDecode(rpcResp.body);
+          if (body is Map) {
+            final dynamic msg = body['message'] ?? body['data'];
+            if (msg is List) rawHeaders = msg;
+          }
+        }
+      } catch (e) {
+        AppLogger.d('ApiService', 'Fetch survey templates fallback error: $e');
+      }
+    }
+
+    if (rawHeaders.isNotEmpty) {
+      final List<HcpSurveyTemplate> templates = [];
+      for (final item in rawHeaders) {
+        if (item is! Map) continue;
+        final itemMap = Map<String, dynamic>.from(item);
+        final docName = (itemMap['name'] ?? '').toString().trim();
+        HcpSurveyTemplate parsed = HcpSurveyTemplate.fromJson(itemMap);
+        if (docName.isNotEmpty) {
+          try {
+            final detailUrl = Uri.parse(
+              '$baseUrl/api/resource/HCP%20Survey%20Template/${Uri.encodeComponent(docName)}',
+            );
+            final detailResp = await http.get(detailUrl, headers: _headers);
+            if (detailResp.statusCode == 200) {
+              final detailBody = jsonDecode(detailResp.body);
+              if (detailBody is Map && detailBody['data'] is Map) {
+                parsed = HcpSurveyTemplate.fromJson(
+                  Map<String, dynamic>.from(detailBody['data'] as Map),
+                );
+              }
+            }
+          } catch (e) {
+            AppLogger.d('ApiService', 'Fetch survey template detail ($docName) error: $e');
+          }
+        }
+        if (parsed.isActive) {
+          templates.add(parsed);
+        }
+      }
+      await _writeToCache(
+        'survey_templates_cache.json',
+        jsonEncode(templates.map((t) => t.toJson()).toList()),
+      );
+      return templates;
+    }
+
+    return readCachedTemplates();
   }
 
   /// Retrieve list of HCP Types (used as Link values for hcp_type field) with cache & local fallback

@@ -520,15 +520,51 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
     });
   }
 
+  bool get _hasAvailableSurvey =>
+      _activeSurvey != null && _activeSurvey!.questions.isNotEmpty;
+
   void _updateActiveSurveyForProgram(String program, {bool preserveExisting = false}) {
     if (_allSurveyTemplates.isNotEmpty) {
+      final pNorm = program.trim().toLowerCase();
+      String acronymFor(String text) {
+        final words = text
+            .trim()
+            .split(RegExp(r'[\s\-_]+'))
+            .where((w) => w.isNotEmpty)
+            .toList();
+        return words.map((w) => w[0].toLowerCase()).join();
+      }
+      final pAcronym = acronymFor(program);
+
       HcpSurveyTemplate? matched;
-      try {
-        matched = _allSurveyTemplates.firstWhere(
-          (t) => t.isActive && (t.accountOrProgram == program || (program.isNotEmpty && t.templateName.toLowerCase().contains(program.toLowerCase()))),
-        );
-      } catch (_) {
-        matched = null;
+      // 1. Exact case-insensitive match on accountOrProgram or templateName
+      for (final t in _allSurveyTemplates) {
+        if (!t.isActive) continue;
+        final ap = (t.accountOrProgram ?? '').trim().toLowerCase();
+        final tn = t.templateName.trim().toLowerCase();
+        final nm = t.name.trim().toLowerCase();
+        if (pNorm.isNotEmpty && (ap == pNorm || tn == pNorm || nm == pNorm)) {
+          matched = t;
+          break;
+        }
+      }
+      // 2. Fallback: substring or program acronym match (e.g. "ADC" <-> "Abbott Diabetes Care")
+      if (matched == null && pNorm.isNotEmpty) {
+        for (final t in _allSurveyTemplates) {
+          if (!t.isActive) continue;
+          final ap = (t.accountOrProgram ?? '').trim().toLowerCase();
+          final tn = t.templateName.trim().toLowerCase();
+          final nm = t.name.trim().toLowerCase();
+          if (ap.contains(pNorm) ||
+              pNorm.contains(ap) && ap.isNotEmpty ||
+              tn.contains(pNorm) ||
+              nm.contains(pNorm) ||
+              (pAcronym.length >= 2 &&
+                  (tn.contains(pAcronym) || ap == pAcronym))) {
+            matched = t;
+            break;
+          }
+        }
       }
 
       setState(() {
@@ -3180,6 +3216,23 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
             return GestureDetector(
               onTap: () {
                 if (isActive) {
+                  if (idx == 2 && !_hasAvailableSurvey) {
+                    setState(() {
+                      _currentStep = 3;
+                    });
+                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        backgroundColor: const Color(0xFF0284C7),
+                        content: Text(
+                          'No questionnaire configured for "$_selectedProgram" — redirected to Changes.',
+                          style: const TextStyle(fontSize: 12.5),
+                        ),
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                    return;
+                  }
                   setState(() {
                     _currentStep = idx;
                   });
@@ -5658,6 +5711,97 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
             )
           else
             ..._activeSurvey!.questions.map((q) {
+              final qType = q.questionType.trim().toLowerCase();
+              final parsedOptions = (q.options ?? '')
+                  .split(RegExp(r'[\r\n]+'))
+                  .map((o) => o.trim())
+                  .where((o) => o.isNotEmpty)
+                  .toList();
+              final fieldKey = ValueKey('${_activeSurvey!.name}_${q.question}');
+              final currentAns = _surveyAnswers[q.question] ?? '';
+
+              if (qType == 'select' && parsedOptions.isNotEmpty) {
+                final String? validSelection =
+                    parsedOptions.contains(currentAns) ? currentAns : null;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(q.question, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 6),
+                      DropdownButtonFormField<String>(
+                        key: fieldKey,
+                        value: validSelection,
+                        dropdownColor: Colors.white,
+                        hint: const Text('Select an option...', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+                        style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5),
+                        decoration: InputDecoration(
+                          filled: true,
+                          fillColor: Colors.white,
+                          enabledBorder: OutlineInputBorder(borderSide: const BorderSide(color: Color(0xFFCBD5E1)), borderRadius: BorderRadius.circular(8)),
+                          focusedBorder: OutlineInputBorder(borderSide: const BorderSide(color: Color(0xFF0066FF), width: 2), borderRadius: BorderRadius.circular(8)),
+                        ),
+                        items: parsedOptions
+                            .map((opt) => DropdownMenuItem(value: opt, child: Text(opt)))
+                            .toList(),
+                        onChanged: (val) => setState(() => _surveyAnswers[q.question] = val ?? ''),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              if ((qType == 'multi-select' || qType == 'multiselect') && parsedOptions.isNotEmpty) {
+                final selectedSet = currentAns
+                    .split(',')
+                    .map((s) => s.trim())
+                    .where((s) => s.isNotEmpty)
+                    .toSet();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(q.question, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: parsedOptions.map((opt) {
+                          final selected = selectedSet.contains(opt);
+                          return FilterChip(
+                            label: Text(opt),
+                            selected: selected,
+                            selectedColor: const Color(0xFFDBEAFE),
+                            checkmarkColor: const Color(0xFF0066FF),
+                            labelStyle: TextStyle(
+                              color: selected ? const Color(0xFF1D4ED8) : const Color(0xFF334155),
+                              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                              fontSize: 12.5,
+                            ),
+                            side: BorderSide(
+                              color: selected ? const Color(0xFF0066FF) : const Color(0xFFCBD5E1),
+                            ),
+                            onSelected: (isSel) {
+                              setState(() {
+                                final updated = Set<String>.from(selectedSet);
+                                if (isSel) {
+                                  updated.add(opt);
+                                } else {
+                                  updated.remove(opt);
+                                }
+                                _surveyAnswers[q.question] = updated.join(', ');
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
               return Padding(
                 padding: const EdgeInsets.only(bottom: 16.0),
                 child: Column(
@@ -5666,7 +5810,8 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
                     Text(q.question, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 6),
                     TextFormField(
-                      initialValue: _surveyAnswers[q.question] ?? '',
+                      key: fieldKey,
+                      initialValue: currentAns,
                       style: const TextStyle(color: Color(0xFF0F172A)),
                       decoration: InputDecoration(
                         filled: true,
@@ -6347,7 +6492,15 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
         children: [
           if (_currentStep > 0)
             TextButton(
-              onPressed: () => setState(() => _currentStep--),
+              onPressed: () {
+                setState(() {
+                  if (_currentStep == 3 && !_hasAvailableSurvey) {
+                    _currentStep = 1;
+                  } else {
+                    _currentStep--;
+                  }
+                });
+              },
               child: const Text('Previous', style: TextStyle(color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
             )
           else
@@ -6499,6 +6652,18 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
                       SnackBar(
                         backgroundColor: const Color(0xFFDC2626),
                         content: Text('Cannot proceed: "${_unapprovedWorkplaceNames()}" was rejected by SFE. Please choose an active or pending institution.'),
+                      ),
+                    );
+                    return;
+                  }
+                  if (!_hasAvailableSurvey) {
+                    setState(() => _currentStep = 3);
+                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        backgroundColor: const Color(0xFF0284C7),
+                        content: Text('No questionnaire configured for "$_selectedProgram" — proceeding to Changes.'),
+                        duration: const Duration(seconds: 2),
                       ),
                     );
                     return;

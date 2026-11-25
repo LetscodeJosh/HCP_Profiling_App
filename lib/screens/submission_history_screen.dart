@@ -685,39 +685,43 @@ class _SubmissionHistoryScreenState extends State<SubmissionHistoryScreen> {
                   },
                 ),
 
-                // Dark Workflow Tab Bar
+                // Dark Workflow Tab Bar (Centered across popup header)
                 Container(
                   width: double.infinity,
                   color: const Color(0xFF09090B),
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: Row(
-                      children: List.generate(tabTitles.length, (idx) {
-                        final isSelected = activeDetailTab == idx;
-                        return GestureDetector(
-                          onTap: () => setModalState(() => activeDetailTab = idx),
-                          child: Container(
-                            margin: const EdgeInsets.only(right: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: isSelected ? const Color(0xFF27272A) : Colors.transparent,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: isSelected ? const Color(0xFF3F3F46) : Colors.transparent,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Center(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(tabTitles.length, (idx) {
+                          final isSelected = activeDetailTab == idx;
+                          return GestureDetector(
+                            onTap: () => setModalState(() => activeDetailTab = idx),
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(horizontal: 4),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: isSelected ? const Color(0xFF27272A) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: isSelected ? const Color(0xFF3F3F46) : Colors.transparent,
+                                ),
+                              ),
+                              child: Text(
+                                tabTitles[idx],
+                                style: TextStyle(
+                                  color: isSelected ? Colors.white : const Color(0xFFA1A1AA),
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  fontSize: 13,
+                                ),
                               ),
                             ),
-                            child: Text(
-                              tabTitles[idx],
-                              style: TextStyle(
-                                color: isSelected ? Colors.white : const Color(0xFFA1A1AA),
-                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
+                          );
+                        }),
+                      ),
                     ),
                   ),
                 ),
