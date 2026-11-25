@@ -176,7 +176,8 @@ class Institution {
         state == 'pending sfe approval' ||
         state == 'for sfe approval' ||
         state == 'pending dsm approval' ||
-        state == 'approved') {
+        state == 'approved' ||
+        state == 'remapped') {
       return false;
     }
     if (rejectionReason != null && rejectionReason!.trim().isNotEmpty && docstatus != 1) return true;
@@ -191,7 +192,12 @@ class Institution {
   bool get isPendingApproval {
     if (isRejected) return false;
     final state = (workflowState ?? '').trim().toLowerCase();
-    return state == 'pending approval' || state == 'pending sfe approval' || state == 'for sfe approval' || state == 'pending dsm approval';
+    return state == 'pending approval' ||
+        state == 'pending sfe approval' ||
+        state == 'for sfe approval' ||
+        state == 'pending review' ||
+        state == 'proposal' ||
+        state == 'pending dsm approval';
   }
 
   bool get isApproved {
@@ -342,6 +348,24 @@ class Institution {
           .toList();
     }
 
+    final bool isPropFlag = json['is_proposal'] == 1 ||
+        json['is_proposal'] == true ||
+        json['is_proposal'] == '1' ||
+        json['is_medrep_submission'] == 1 ||
+        json['is_medrep_submission'] == true ||
+        json['is_medrep_submission'] == '1';
+    final int? parsedDocstatus = json['docstatus'] is int
+        ? json['docstatus']
+        : int.tryParse(json['docstatus']?.toString() ?? '');
+    final String? rawWf = json['workflow_state']?.toString();
+    final String? resolvedWf =
+        ((rawWf == null || rawWf.trim().isEmpty || rawWf.trim() == 'Draft') &&
+                isPropFlag &&
+                parsedDocstatus != 1 &&
+                parsedDocstatus != 2)
+            ? 'Pending Approval'
+            : rawWf;
+
     return Institution(
       name: json['name'] ?? '',
       institutionName: LocationResolver.resolveInstitutionName(rawInstName.toString()),
@@ -353,13 +377,13 @@ class Institution {
       rawProvinceName: rawProv,
       rawCityMunicipality: rawCity,
       rawRegionName: rawReg,
-      workflowState: json['workflow_state']?.toString(),
+      workflowState: resolvedWf,
       rejectionReason: (json['rejection_reason'] ?? json['rejection_remarks'])?.toString(),
-      isCustom: json['is_custom'] == true || json['is_custom'] == 1,
+      isCustom: json['is_custom'] == true || json['is_custom'] == 1 || isPropFlag,
       owner: json['owner']?.toString(),
       creation: json['creation']?.toString(),
       modified: json['modified']?.toString(),
-      docstatus: json['docstatus'] is int ? json['docstatus'] : int.tryParse(json['docstatus']?.toString() ?? ''),
+      docstatus: parsedDocstatus,
       isResubmission: json['is_resubmission'] == 1 || json['is_resubmission'] == true || json['is_resubmission'] == '1',
       ownership: (json['ownership'] ?? json['custom_ownership'])?.toString(),
       institutionType: (json['institution_type'] ?? json['custom_institution_type'])?.toString(),

@@ -1129,6 +1129,58 @@ class ApiService extends ChangeNotifier {
   List<HcpProfileSubmission> get cachedSubmissions => _cachedSubmissions;
 
   /// Retrieve list of Company Institutions with region, province, city, and street address fields
+  /// Posts a structured PIMS_META Comment on an Institution so ERPNext Desk and the
+  /// Territory Reconfiguration Web Portal immediately reflect every mobile submission,
+  /// approval, DSM endorsement, rejection, normalization, and remap.
+  Future<bool> _postInstitutionMetaComment({
+    required String institutionId,
+    required String humanText,
+    required Map<String, dynamic> meta,
+  }) async {
+    if (institutionId.trim().isEmpty || _isOffline) return false;
+    final cleanId = institutionId.trim();
+    final content = '$humanText<!--PIMS_META:${jsonEncode(meta)}-->';
+    try {
+      await ensureCsrfToken();
+      final commentUrl = Uri.parse('$baseUrl/api/resource/Comment');
+      final res = await http
+          .post(
+            commentUrl,
+            headers: _headers,
+            body: jsonEncode({
+              'doctype': 'Comment',
+              'comment_type': 'Comment',
+              'reference_doctype': 'Institution',
+              'reference_name': cleanId,
+              'content': content,
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200 || res.statusCode == 201) return true;
+
+      final insertUrl = Uri.parse('$baseUrl/api/method/frappe.client.insert');
+      final rpcRes = await http
+          .post(
+            insertUrl,
+            headers: _headers,
+            body: jsonEncode({
+              'doc': {
+                'doctype': 'Comment',
+                'comment_type': 'Comment',
+                'reference_doctype': 'Institution',
+                'reference_name': cleanId,
+                'content': content,
+              },
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      return rpcRes.statusCode == 200 || rpcRes.statusCode == 201;
+    } catch (e) {
+      AppLogger.d('ApiService', '_postInstitutionMetaComment error ($cleanId): $e');
+      return false;
+    }
+  }
+
   Future<List<Institution>> fetchInstitutions() async {
     if (_isOffline) {
       final cache = await _readFromCache('institutions_cache.json');
@@ -1230,13 +1282,31 @@ class ApiService extends ChangeNotifier {
 
         // Hydrate PIMS_META & Audit Trail from Frappe Comment doctype (ensures 100% sync with SFE Web Portal)
         try {
+          List<dynamic> comments = [];
           final commentUrl = Uri.parse(
             '$baseUrl/api/resource/Comment?fields=["name","reference_name","content","comment_by","owner","creation"]&filters=[["reference_doctype","=","Institution"]]&order_by=creation%20desc&limit_page_length=2500',
           );
           final commentRes = await http.get(commentUrl, headers: _headers).timeout(const Duration(seconds: 10));
           if (commentRes.statusCode == 200) {
             final cBody = jsonDecode(commentRes.body);
-            final List<dynamic> comments = cBody['data'] ?? [];
+            if (cBody is Map && cBody['data'] is List) {
+              comments = cBody['data'] as List<dynamic>;
+            }
+          } else {
+            final rpcCommentUrl = Uri.parse(
+              '$baseUrl/api/method/frappe.client.get_list?doctype=Comment&fields=["name","reference_name","content","comment_by","owner","creation"]&filters=[["reference_doctype","=","Institution"]]&order_by=creation%20desc&limit_page_length=2500',
+            );
+            final rpcCommentRes = await http.get(rpcCommentUrl, headers: _headers).timeout(const Duration(seconds: 10));
+            if (rpcCommentRes.statusCode == 200) {
+              final rpcBody = jsonDecode(rpcCommentRes.body);
+              if (rpcBody is Map) {
+                final dynamic msg = rpcBody['message'] ?? rpcBody['data'];
+                if (msg is List) comments = msg;
+              }
+            }
+          }
+
+          if (comments.isNotEmpty) {
             final Map<String, List<Map<String, dynamic>>> commentsByInst = {};
             for (final c in comments) {
               if (c is Map) {
@@ -1261,12 +1331,19 @@ class ApiService extends ChangeNotifier {
                     try {
                       final metaObj = jsonDecode(match.group(1)!) as Map<String, dynamic>;
                       metaObj.forEach((mk, mv) {
-                        if (mv != null && mv.toString().isNotEmpty && !{'action', 'user', 'role', 'timestamp', 'details'}.contains(mk)) {
+                        if (mv != null &&
+                            (mv.toString().isNotEmpty ||
+                                {'is_proposal', 'is_medrep_submission', 'docstatus', 'is_certified'}.contains(mk)) &&
+                            !{'action', 'user', 'role', 'timestamp', 'details'}.contains(mk)) {
                           instMap[mk] = mv;
                         }
                       });
-                      if (metaObj['workflow_state'] != null && metaObj['workflow_state'].toString().isNotEmpty) {
-                        instMap['workflow_state'] = metaObj['workflow_state'];
+                      final metaWf = metaObj['workflow_state']?.toString() ?? '';
+                      if (metaWf.isNotEmpty) {
+                        instMap['workflow_state'] = metaWf;
+                        if ({'Approved', 'Pending Approval', 'Pending DSM Approval', 'Draft'}.contains(metaWf)) {
+                          instMap['rejection_reason'] = '';
+                        }
                       }
                       if (metaObj['rejection_reason'] != null && metaObj['rejection_reason'].toString().isNotEmpty) {
                         instMap['rejection_reason'] = metaObj['rejection_reason'];
@@ -1615,8 +1692,11 @@ class ApiService extends ChangeNotifier {
 
       // Always log a structured Frappe Comment with PIMS_META so the SFE Web Portal receives 100% of MedRep proposal metadata
       if (assignedId.isNotEmpty) {
-        try {
-          final metaEnvelope = jsonEncode({
+        final submittedBy = loggedInFullName ?? loggedInEmail ?? 'MedRep';
+        await _postInstitutionMetaComment(
+          institutionId: assignedId,
+          humanText: note ?? 'Proposed new institution for SFE approval.',
+          meta: {
             'institution_name': cleanWp,
             'region_name': resolvedReg.isNotEmpty ? resolvedReg : (regId.isNotEmpty ? regId : region),
             'province_name': resolvedProv.isNotEmpty ? resolvedProv : (provId.isNotEmpty ? provId : province),
@@ -1627,30 +1707,23 @@ class ApiService extends ChangeNotifier {
             if (serviceCapability != null) 'service_capability': serviceCapability,
             'workflow_state': 'Pending Approval',
             'docstatus': 0,
+            'is_proposal': 1,
+            'is_medrep_submission': 1,
             'requires_dsm_approval': requiresDsmApproval ? 1 : 0,
             if (linkedDoctorName != null) 'linked_doctor_name': linkedDoctorName,
             'is_certified': isCertified ? 1 : 0,
             if (note != null) 'certification_note': note,
             'resubmission_count': 0,
             'owner': loggedInEmail ?? 'MedRep',
+            'submitted_by': submittedBy,
+            'submitted_at': now.toIso8601String(),
             'action': isCertified ? 'Initial Proposal (Certified)' : 'Initial Proposal',
-            'user': loggedInFullName ?? loggedInEmail ?? 'MedRep',
+            'user': submittedBy,
             'role': isManager ? 'DSM' : 'MedRep',
             'timestamp': now.toIso8601String(),
             'details': 'Proposed new ${institutionType ?? "Facility"} (${ownership ?? "Private"}) at $resolvedCity, $resolvedProv${note != null ? ". $note" : ""}',
-          });
-          final commentUrl = Uri.parse('$baseUrl/api/resource/Comment');
-          await http.post(
-            commentUrl,
-            headers: _headers,
-            body: jsonEncode({
-              'comment_type': 'Comment',
-              'reference_doctype': 'Institution',
-              'reference_name': assignedId,
-              'content': '${note ?? "Proposed new institution for SFE approval."}<!--PIMS_META:$metaEnvelope-->',
-            }),
-          );
-        } catch (_) {}
+          },
+        );
       }
       if (isCertified && note != null && assignedId.isNotEmpty) {
 
@@ -1843,8 +1916,11 @@ class ApiService extends ChangeNotifier {
           }),
         );
       } catch (_) {}
-      try {
-        final resubMeta = jsonEncode({
+      final submittedBy = loggedInFullName ?? loggedInEmail ?? 'MedRep';
+      await _postInstitutionMetaComment(
+        institutionId: name,
+        humanText: 'Modified and resubmitted by $submittedBy (Attempt $newCount/2): $cleanWp',
+        meta: {
           'institution_name': cleanWp,
           'region_name': resolvedReg.isNotEmpty ? resolvedReg : (regId.isNotEmpty ? regId : region),
           'province_name': resolvedProv.isNotEmpty ? resolvedProv : (provId.isNotEmpty ? provId : province),
@@ -1854,27 +1930,20 @@ class ApiService extends ChangeNotifier {
           if (serviceCapability != null) 'service_capability': serviceCapability,
           'workflow_state': requiresDsmApproval ? 'Pending DSM Approval' : 'Pending Approval',
           'docstatus': 0,
+          'is_proposal': requiresDsmApproval ? 0 : 1,
+          'is_medrep_submission': requiresDsmApproval ? 0 : 1,
           'rejection_reason': '',
           'is_resubmission': 1,
           'resubmission_count': newCount,
+          'submitted_by': submittedBy,
+          'submitted_at': now.toIso8601String(),
           'action': 'Resubmitted (Attempt $newCount/2)',
-          'user': loggedInFullName ?? loggedInEmail ?? 'MedRep',
-          'role': isManager ? 'DSM' : 'MedRep',
+          'user': submittedBy,
+          'role': isManager ? 'DSM' : (isSfe ? 'SFE Specialist' : 'MedRep'),
           'timestamp': now.toIso8601String(),
           'details': 'Modified & resubmitted facility (Attempt $newCount/2): $cleanWp ($ownership, $institutionType, $serviceCapability) at $resolvedCity, $resolvedProv',
-        });
-        final commentUrl = Uri.parse('$baseUrl/api/resource/Comment');
-        await http.post(
-          commentUrl,
-          headers: _headers,
-          body: jsonEncode({
-            'comment_type': 'Comment',
-            'reference_doctype': 'Institution',
-            'reference_name': name,
-            'content': 'Modified and resubmitted by MedRep (Attempt $newCount/2): $cleanWp<!--PIMS_META:$resubMeta-->',
-          }),
-        );
-      } catch (_) {}
+        },
+      );
     }
 
     final updatedAudit = List<InstitutionAuditLogEntry>.from(existing?.auditTrail ?? []);
@@ -2108,6 +2177,31 @@ class ApiService extends ChangeNotifier {
 
     if (autoApprove) {
       await approveInstitution(name);
+    } else if (!_isOffline) {
+      final normActor = loggedInFullName ?? loggedInEmail ?? 'SFE Specialist';
+      await _postInstitutionMetaComment(
+        institutionId: name,
+        humanText: 'Normalized by SFE ($normActor): $cleanWp',
+        meta: {
+          'institution_name': cleanWp,
+          'region_name': resolvedReg.isNotEmpty ? resolvedReg : (regId.isNotEmpty ? regId : region),
+          'province_name': resolvedProv.isNotEmpty ? resolvedProv : (provId.isNotEmpty ? provId : province),
+          'city_municipality': resolvedCity.isNotEmpty ? resolvedCity : (cityId.isNotEmpty ? cityId : city),
+          if (ownership != null) 'ownership': ownership,
+          if (institutionType != null) 'institution_type': institutionType,
+          if (serviceCapability != null) 'service_capability': serviceCapability,
+          'workflow_state': existing?.workflowState ?? 'Pending Approval',
+          'docstatus': 0,
+          'is_proposal': 1,
+          'is_medrep_submission': 1,
+          'rejection_reason': existing?.rejectionReason ?? '',
+          'action': 'Normalized by SFE',
+          'user': normActor,
+          'role': isSfe ? 'SFE Specialist' : 'Admin',
+          'timestamp': DateTime.now().toIso8601String(),
+          'details': 'Standardized facility metadata: $cleanWp ($ownership, $institutionType, $serviceCapability) at $resolvedCity, $resolvedProv',
+        },
+      );
     }
 
     final updatedAudit = List<InstitutionAuditLogEntry>.from(existing?.auditTrail ?? []);
@@ -2213,6 +2307,7 @@ class ApiService extends ChangeNotifier {
     }
 
     notifyListeners();
+    fetchInstitutions().catchError((_) => <Institution>[]);
     return normalized;
   }
 
@@ -2257,6 +2352,7 @@ class ApiService extends ChangeNotifier {
             'docstatus': targetDocstatus,
           }),
         );
+        success = putRes.statusCode == 200;
         if (!success) {
           try {
             final setValueUrl = Uri.parse('$baseUrl/api/method/frappe.client.set_value');
@@ -2280,18 +2376,46 @@ class ApiService extends ChangeNotifier {
         }
       }
 
+      final now = DateTime.now();
+      final user = loggedInFullName ?? loggedInEmail ?? (isSfe ? 'SFE Specialist' : 'System Admin');
+      final role = isSfe ? 'SFE Specialist' : (isManager ? 'DSM' : 'System Admin');
+      final actionLabel = needsDsm ? 'Routed to DSM' : 'Approved';
+      final detailsMsg = needsDsm
+          ? 'Validated by SFE and routed to DSM for regional approval'
+          : 'Institution validated and approved by SFE';
+
+      final commentPosted = await _postInstitutionMetaComment(
+        institutionId: name,
+        humanText: '[SFE Governance — $actionLabel] ${existing?.institutionName ?? name} ($targetWorkflowState) by $user',
+        meta: {
+          'institution_name': existing?.institutionName ?? name,
+          'workflow_state': targetWorkflowState,
+          'docstatus': targetDocstatus,
+          'is_proposal': 0,
+          'is_medrep_submission': 0,
+          'rejection_reason': '',
+          'approved_by': user,
+          'approved_at': now.toIso8601String(),
+          'action': actionLabel,
+          'user': user,
+          'role': role,
+          'timestamp': now.toIso8601String(),
+          'details': detailsMsg,
+        },
+      );
+      if (!success && commentPosted) {
+        success = true;
+      }
+
       if (success) {
-        final now = DateTime.now();
-        final user = loggedInFullName ?? loggedInEmail ?? (isSfe ? 'SFE Specialist' : 'System Admin');
-        final role = isSfe ? 'SFE Specialist' : (isManager ? 'DSM' : 'System Admin');
         final updatedAudit = List<InstitutionAuditLogEntry>.from(existing?.auditTrail ?? []);
         updatedAudit.add(
           InstitutionAuditLogEntry(
             timestamp: now,
             user: user,
             role: role,
-            action: needsDsm ? 'Routed to DSM' : 'Approved',
-            details: needsDsm ? 'Validated by SFE and routed to DSM for regional approval' : 'Institution validated and approved by SFE',
+            action: actionLabel,
+            details: detailsMsg,
             snapshot: {
               'workflow_state': targetWorkflowState,
               'institution_name': existing?.institutionName ?? name,
@@ -2376,9 +2500,32 @@ class ApiService extends ChangeNotifier {
         }
       }
 
+      final now = DateTime.now();
+      final user = loggedInFullName ?? loggedInEmail ?? 'DSM';
+      final commentPosted = await _postInstitutionMetaComment(
+        institutionId: name,
+        humanText: '[DSM Governance — Approved] ${existing?.institutionName ?? name} endorsed and approved by $user',
+        meta: {
+          'institution_name': existing?.institutionName ?? name,
+          'workflow_state': targetWorkflowState,
+          'docstatus': targetDocstatus,
+          'is_proposal': 0,
+          'is_medrep_submission': 0,
+          'rejection_reason': '',
+          'approved_by': user,
+          'approved_at': now.toIso8601String(),
+          'action': 'Approved by DSM',
+          'user': user,
+          'role': 'DSM',
+          'timestamp': now.toIso8601String(),
+          'details': 'Regional endorsement and final approval granted by District Sales Manager',
+        },
+      );
+      if (!success && commentPosted) {
+        success = true;
+      }
+
       if (success) {
-        final now = DateTime.now();
-        final user = loggedInFullName ?? loggedInEmail ?? 'DSM';
         final updatedAudit = List<InstitutionAuditLogEntry>.from(existing?.auditTrail ?? []);
         updatedAudit.add(
           InstitutionAuditLogEntry(
@@ -2522,12 +2669,35 @@ class ApiService extends ChangeNotifier {
         }
       }
 
+      final idx = _cachedInstitutions.indexWhere((i) => i.name == name);
+      final existingInst = idx >= 0 ? _cachedInstitutions[idx] : null;
+      final now = DateTime.now();
+      final user = loggedInFullName ?? loggedInEmail ?? (isSfe ? 'SFE Specialist' : 'Reviewer');
+      final role = isSfe ? 'SFE Specialist' : (isManager ? 'DSM' : 'System Admin');
+
+      final commentPosted = await _postInstitutionMetaComment(
+        institutionId: name,
+        humanText: '[Governance — Rejected] ${existingInst?.institutionName ?? name} rejected by $user. Reason: $cleanReason',
+        meta: {
+          'institution_name': existingInst?.institutionName ?? name,
+          'workflow_state': 'Rejected',
+          'docstatus': 0,
+          'is_proposal': 0,
+          'is_medrep_submission': 0,
+          'rejection_reason': cleanReason,
+          'action': 'Rejected',
+          'user': user,
+          'role': role,
+          'timestamp': now.toIso8601String(),
+          'details': 'Rejected with reason: $cleanReason',
+        },
+      );
+      if (!success && commentPosted) {
+        success = true;
+      }
+
       if (success) {
-        final idx = _cachedInstitutions.indexWhere((i) => i.name == name);
         String targetInstName = name;
-        final now = DateTime.now();
-        final user = loggedInFullName ?? loggedInEmail ?? (isSfe ? 'SFE Specialist' : 'Reviewer');
-        final role = isSfe ? 'SFE Specialist' : (isManager ? 'DSM' : 'System Admin');
 
         if (idx >= 0) {
           final old = _cachedInstitutions[idx];
@@ -2787,15 +2957,38 @@ class ApiService extends ChangeNotifier {
         }),
       );
 
+      final remapNow = DateTime.now();
+      final remapUser = loggedInFullName ?? loggedInEmail ?? 'SFE Specialist';
+      final remapRole = isSfe ? 'SFE Specialist' : (isAdmin ? 'System Admin' : 'Reviewer');
+      await _postInstitutionMetaComment(
+        institutionId: oldId,
+        humanText: '[SFE Governance — Remapped] $oldName remapped to ${replacementInstitution.institutionName} (${replacementInstitution.name}) by $remapUser',
+        meta: {
+          'institution_name': oldName,
+          'workflow_state': 'Remapped',
+          'docstatus': 0,
+          'is_proposal': 0,
+          'is_medrep_submission': 0,
+          'remapped_to_id': replacementInstitution.name,
+          'remapped_to_name': replacementInstitution.institutionName,
+          'rejection_reason': '$remappedTag ($note)',
+          'action': 'Remapped by SFE',
+          'user': remapUser,
+          'role': remapRole,
+          'timestamp': remapNow.toIso8601String(),
+          'details': '$remappedTag. $note',
+        },
+      );
+
       // 2. Update local cached institution
       if (idx >= 0) {
         final old = _cachedInstitutions[idx];
         final updatedAudit = List<InstitutionAuditLogEntry>.from(old.auditTrail);
         updatedAudit.add(
           InstitutionAuditLogEntry(
-            timestamp: DateTime.now(),
-            user: loggedInFullName ?? loggedInEmail ?? 'SFE Specialist',
-            role: isSfe ? 'SFE Specialist' : (isAdmin ? 'System Admin' : 'Reviewer'),
+            timestamp: remapNow,
+            user: remapUser,
+            role: remapRole,
             action: 'Remapped by SFE',
             details: '$remappedTag. $note',
             snapshot: {

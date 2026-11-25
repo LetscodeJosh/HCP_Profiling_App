@@ -21,6 +21,8 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   Timer? _cooldownTimer;
+  Timer? _syncTimer;
+  bool _isBackgroundSyncing = false;
 
   @override
   void initState() {
@@ -34,11 +36,25 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
         }
       }
     });
+    _syncTimer = Timer.periodic(const Duration(seconds: 15), (_) => _silentSync());
+  }
+
+  Future<void> _silentSync() async {
+    if (_isBackgroundSyncing || _isLoading || !mounted) return;
+    _isBackgroundSyncing = true;
+    try {
+      final apiService = Provider.of<ApiService>(context, listen: false);
+      await apiService.fetchInstitutions();
+    } catch (_) {
+    } finally {
+      _isBackgroundSyncing = false;
+    }
   }
 
   @override
   void dispose() {
     _cooldownTimer?.cancel();
+    _syncTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -1074,8 +1090,8 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
 
     // SFE Institution Approvals are centralized in the Territory Reconfiguration Web App (Desktop/Laptop)
 
-    // For MedRep / Sales User / Manager
-    final isManager = apiService.isManager || apiService.isAdmin;
+    // For MedRep / Sales User / Manager / SFE / Admin
+    final isManager = apiService.isManager || apiService.isAdmin || apiService.isSfe;
     final submittedOrActionable = apiService.cachedInstitutions
         .where((i) => i.isRejected || i.isPendingApproval || i.workflowState == 'Pending DSM Approval' || i.isCustom)
         .toList();
