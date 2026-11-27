@@ -140,11 +140,19 @@ class ResourceRequestSchema:
         if not clean_dt or not SAFE_IDENTIFIER_REGEX.match(clean_dt) or ".." in clean_dt or "/" in clean_dt or "\\" in clean_dt:
             raise SecurityValidationError(f"Invalid or unsafe DocType identifier: '{doctype}'")
 
-        # 2. Validate DocName
+        # 2. Validate DocName (Allow valid ERPNext territory slashes like NGMA/NLZ/VIZ while blocking traversal)
         clean_name: Optional[str] = None
         if name:
             clean_name = sanitize_string(name, max_len=140)
-            if ".." in clean_name or "/" in clean_name or "\\" in clean_name:
+            if (
+                ".." in clean_name
+                or "\\" in clean_name
+                or "?" in clean_name
+                or "#" in clean_name
+                or clean_name.startswith("/")
+                or clean_name.endswith("/")
+                or "//" in clean_name
+            ):
                 raise SecurityValidationError(f"Path traversal detected in resource name: '{name}'")
 
         # 3. Parse fields
@@ -171,13 +179,12 @@ class ResourceRequestSchema:
         limit_len = sanitize_int(query_params.get("limit_page_length", 20), default=20, min_val=0, max_val=10000)
         limit_start = sanitize_int(query_params.get("limit_start", 0), default=0, min_val=0, max_val=500_000)
 
-        # 5. Safe Order By
+        # 5. Safe Order By (Supports validated single or multi-column Frappe clauses e.g. 'is_group desc,name asc')
         order_by: Optional[str] = None
         raw_order = query_params.get("order_by")
         if raw_order and isinstance(raw_order, str):
-            clean_order = sanitize_string(raw_order, 60)
-            # Allowed: 'creation desc', 'modified asc', 'name'
-            if re.match(r'^[a-zA-Z0-9_]+(\s+(asc|desc))?$', clean_order, re.IGNORECASE):
+            clean_order = sanitize_string(raw_order, 120)
+            if re.match(r'^[a-zA-Z0-9_]+(\s+(asc|desc))?(\s*,\s*[a-zA-Z0-9_]+(\s+(asc|desc))?)*$', clean_order, re.IGNORECASE):
                 order_by = clean_order
 
         # 6. Filters

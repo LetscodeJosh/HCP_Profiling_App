@@ -8,6 +8,7 @@ import '../models/submission.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import 'components/app_drawer.dart';
+import 'components/user_initials_avatar.dart';
 import 'doctor_masterlist_screen.dart';
 import 'doctor_account_screen.dart';
 import 'hcp_wizard_screen.dart';
@@ -119,7 +120,7 @@ class _HcpDashboardScreenState extends State<HcpDashboardScreen> {
 
   Future<void> _loadDashboardData() async {
     final apiService = Provider.of<ApiService>(context, listen: false);
-    if (apiService.isSfe) {
+    if (apiService.isSfe && !apiService.isAdmin) {
       if (mounted) setState(() => _isLoading = false);
       return;
     }
@@ -319,44 +320,10 @@ class _HcpDashboardScreenState extends State<HcpDashboardScreen> {
           ],
         ),
         actions: [
-          // Position Role Badge
-          Container(
-            alignment: Alignment.center,
-            margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: apiService.isSfe
-                  ? const Color(0xFFA855F7).withOpacity(0.25)
-                  : (apiService.isAdmin
-                      ? const Color(0xFFEF4444).withOpacity(0.25)
-                      : (apiService.isManager
-                          ? const Color(0xFFF59E0B).withOpacity(0.25)
-                          : const Color(0xFF0066FF).withOpacity(0.25))),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: apiService.isSfe
-                    ? const Color(0xFFA855F7)
-                    : (apiService.isAdmin
-                        ? const Color(0xFFEF4444)
-                        : (apiService.isManager
-                            ? const Color(0xFFF59E0B)
-                            : const Color(0xFF38BDF8))),
-                width: 0.8,
-              ),
-            ),
-            child: Text(
-              apiService.userDesignationTitle,
-              style: TextStyle(
-                color: apiService.isSfe
-                    ? const Color(0xFFD8B4FE)
-                    : (apiService.isAdmin
-                        ? const Color(0xFFFCA5A5)
-                        : (apiService.isManager
-                            ? const Color(0xFFFCD34D)
-                            : const Color(0xFF93C5FD))),
-                fontSize: 10.5,
-                fontWeight: FontWeight.bold,
-              ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Center(
+              child: UserInitialsAvatar(apiService: apiService, size: 32),
             ),
           ),
           IconButton(

@@ -51,11 +51,12 @@ ASSETS_HTML = os.path.join(BASE_DIR, 'assets', 'web', 'territory_reconfiguration
 # 🚀 SERVER ENVIRONMENT SWITCH (SINGLE-LINE TOGGLE)
 # Change to 'production' or 'development'
 # ===========================================================================
-# Environment-driven ERPNext URL (strictly isolated from version control)
-_raw_env_url = os.environ.get('ERPNEXT_URL', 'https://dev.pmii-marketing.com').rstrip('/')
+# Environment-driven ERPNext URL (strictly aligned with Staging UAT default)
+_raw_env_url = os.environ.get('ERPNEXT_URL', 'https://staging.pmii-marketing.com').rstrip('/')
 ERPNEXT_SERVER_URL = _raw_env_url
 
 ACTIVE_COOKIE_JAR = http.cookiejar.CookieJar()
+ACTIVE_CSRF_TOKEN = None
 ACTIVE_SSL_CTX = ssl.create_default_context()
 if os.environ.get('ERPNEXT_INSECURE_SSL') == '1':
     ACTIVE_SSL_CTX.check_hostname = False
@@ -65,26 +66,50 @@ ACTIVE_OPENER = urllib.request.build_opener(
     urllib.request.HTTPSHandler(context=ACTIVE_SSL_CTX)
 )
 
+def ensure_active_csrf_token(force_refresh=False):
+    global ACTIVE_CSRF_TOKEN
+    if ACTIVE_CSRF_TOKEN and not force_refresh:
+        return ACTIVE_CSRF_TOKEN
+    try:
+        req = urllib.request.Request(
+            f"{ERPNEXT_SERVER_URL}/app",
+            headers={'Accept': 'text/html', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PIMS-Portal'}
+        )
+        res = ACTIVE_OPENER.open(req, timeout=10)
+        html_text = res.read().decode('utf-8', errors='ignore')
+        m = re.search(r'(?:frappe\.csrf_token\s*=\s*|["\']csrf_token["\']\s*:\s*)["\']([a-fA-F0-9]+)["\']', html_text)
+        if m:
+            ACTIVE_CSRF_TOKEN = m.group(1)
+            return ACTIVE_CSRF_TOKEN
+    except Exception:
+        pass
+    return ACTIVE_CSRF_TOKEN
+
 def renew_active_opener():
-    global ACTIVE_OPENER, ACTIVE_COOKIE_JAR
+    global ACTIVE_OPENER, ACTIVE_COOKIE_JAR, ACTIVE_CSRF_TOKEN
     svc_user = os.environ.get('PIMS_SERVICE_USER', '')
     svc_pwd = os.environ.get('PIMS_SERVICE_PASSWORD', '')
+    # Never wipe an authenticated user's session jar unless service credentials exist to re-authenticate
+    if not (svc_user and svc_pwd and ERPNEXT_SERVER_URL):
+        return False
     ACTIVE_COOKIE_JAR = http.cookiejar.CookieJar()
+    ACTIVE_CSRF_TOKEN = None
     ACTIVE_OPENER = urllib.request.build_opener(
         urllib.request.HTTPCookieProcessor(ACTIVE_COOKIE_JAR),
         urllib.request.HTTPSHandler(context=ACTIVE_SSL_CTX)
     )
-    if svc_user and svc_pwd and ERPNEXT_SERVER_URL:
-        try:
-            payload = json.dumps({'usr': svc_user, 'pwd': svc_pwd}).encode('utf-8')
-            login_req = urllib.request.Request(
-                f"{ERPNEXT_SERVER_URL}/api/method/login",
-                data=payload,
-                headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'}
-            )
-            ACTIVE_OPENER.open(login_req, timeout=10)
-        except Exception as ex:
-            print(f"[Desktop Server Session Renewal Warning] {ex}")
+    try:
+        payload = json.dumps({'usr': svc_user, 'pwd': svc_pwd}).encode('utf-8')
+        login_req = urllib.request.Request(
+            f"{ERPNEXT_SERVER_URL}/api/method/login",
+            data=payload,
+            headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'}
+        )
+        ACTIVE_OPENER.open(login_req, timeout=10)
+        return True
+    except Exception as ex:
+        print(f"[Desktop Server Session Renewal Warning] {ex}")
+        return False
 
 def get_latest_portal_html():
     if os.path.exists(LOCAL_HTML):
@@ -135,7 +160,7 @@ def record_server_failed_attempt(identifier, is_violation=False):
     now = time.time()
     record = LOGIN_ATTEMPTS_REGISTRY.get(identifier, (0, 0))
     count = record[0] + 1
-    if is_violation or count >= 5:
+    if is_violation or count >= 6:
         lockout_until = now + 15 * 60
         LOGIN_ATTEMPTS_REGISTRY[identifier] = (count, lockout_until)
         return count, True
@@ -228,11 +253,11 @@ def authenticate_erpnext_user(usr, pwd, client_ip=""):
             if e.code == 401:
                 attempts, is_locked = record_server_failed_attempt(identifier)
                 if is_locked:
-                    return {'success': False, 'authorized': False, 'message': '🔒 Maximum 5 login attempts reached. Access locked for 15 minutes.'}
-                return {'success': False, 'authorized': False, 'message': f'Invalid username or password. Please verify your credentials in your ERPNext account. (Attempt {attempts} of 5)'}
+                    return {'success': False, 'authorized': False, 'message': '🔒 Maximum 6 login attempts reached. Access locked for 15 minutes.'}
+                return {'success': False, 'authorized': False, 'message': f'Invalid username or password. Please verify your credentials in your ERPNext account. (Attempt {attempts} of 6)'}
             if attempt == max_retries - 1:
                 attempts, is_locked = record_server_failed_attempt(identifier)
-                return {'success': False, 'authorized': False, 'message': f'ERPNext authentication error (HTTP {e.code}). Please try again. (Attempt {attempts} of 5)'}
+                return {'success': False, 'authorized': False, 'message': f'ERPNext authentication error (HTTP {e.code}). Please try again. (Attempt {attempts} of 6)'}
         except Exception as e:
             if attempt == max_retries - 1:
                 server_host = urllib.parse.urlparse(erp_url).netloc or 'ERPNext Server'
@@ -241,7 +266,7 @@ def authenticate_erpnext_user(usr, pwd, client_ip=""):
 
     if login_res.get('message') != 'Logged In':
         attempts, is_locked = record_server_failed_attempt(identifier)
-        return {'success': False, 'authorized': False, 'message': f'Authentication failed on ERPNext. (Attempt {attempts} of 5)'}
+        return {'success': False, 'authorized': False, 'message': f'Authentication failed on ERPNext. (Attempt {attempts} of 6)'}
 
     # Verify that a new valid sid cookie was genuinely issued into the isolated jar
     has_sid = any(c.name == 'sid' and c.value and c.value != 'Guest' for c in isolated_jar)
@@ -270,12 +295,14 @@ def authenticate_erpnext_user(usr, pwd, client_ip=""):
     is_sfe = any(k in all_roles_str for k in ['sales force effectiveness', 'sales manager', 'sales master manager', 'sfe', 'territory manager', 'district sales manager', 'dsm', 'sales user', 'medical representative', 'medrep', 'employee'])
 
     # Success! Bind authenticated session opener and reset failed attempts
-    global ACTIVE_OPENER, ACTIVE_COOKIE_JAR
+    global ACTIVE_OPENER, ACTIVE_COOKIE_JAR, ACTIVE_CSRF_TOKEN
     ACTIVE_OPENER = opener
     ACTIVE_COOKIE_JAR = isolated_jar
+    ACTIVE_CSRF_TOKEN = None
+    ensure_active_csrf_token(force_refresh=True)
     clear_server_failed_attempts(identifier)
     role_title = 'Administrator' if is_admin else ('SFE Lead' if is_sfe else (role_profile or 'Enterprise User'))
-    server_host = urllib.parse.urlparse(erp_url).netloc or 'dev.pmii-marketing.com'
+    server_host = urllib.parse.urlparse(erp_url).netloc or 'staging.pmii-marketing.com'
 
     return {
         'success': True,
@@ -317,7 +344,7 @@ class PortalHandler(http.server.SimpleHTTPRequestHandler):
         docname = None
         if len(path_parts) >= 2 and path_parts[0] == "api" and path_parts[1] == "resource":
             doctype = urllib.parse.unquote(path_parts[2]) if len(path_parts) >= 3 else ""
-            docname = urllib.parse.unquote(path_parts[3]) if len(path_parts) >= 4 else None
+            docname = "/".join(urllib.parse.unquote(p) for p in path_parts[3:]) if len(path_parts) >= 4 else None
         elif len(path_parts) >= 2 and path_parts[0] == "api" and path_parts[1] == "method":
             doctype = "RPC_METHOD"
             docname = path_parts[2] if len(path_parts) >= 3 else None
@@ -388,6 +415,10 @@ class PortalHandler(http.server.SimpleHTTPRequestHandler):
         # Credentials isolation: Inject isolated Frappe API token if set in environment
         if os.environ.get('FRAPPE_API_KEY') and os.environ.get('FRAPPE_API_SECRET'):
             headers['Authorization'] = f"token {os.environ.get('FRAPPE_API_KEY')}:{os.environ.get('FRAPPE_API_SECRET')}"
+        elif method.upper() in ('POST', 'PUT', 'DELETE', 'PATCH'):
+            csrf = ensure_active_csrf_token()
+            if csrf:
+                headers['X-Frappe-CSRF-Token'] = csrf
 
         req = urllib.request.Request(target_url, data=req_body, headers=headers, method=method)
         try:
@@ -400,8 +431,24 @@ class PortalHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(resp_body)
         except urllib.error.HTTPError as e:
-            if e.code in [401, 403]:
-                renew_active_opener()
+            err_body = e.read()
+            if e.code == 400 and b'CSRFTokenError' in err_body and method.upper() in ('POST', 'PUT', 'DELETE', 'PATCH'):
+                refreshed_csrf = ensure_active_csrf_token(force_refresh=True)
+                if refreshed_csrf:
+                    headers['X-Frappe-CSRF-Token'] = refreshed_csrf
+                    retry_csrf_req = urllib.request.Request(target_url, data=req_body, headers=headers, method=method)
+                    try:
+                        retry_res = ACTIVE_OPENER.open(retry_csrf_req, timeout=15)
+                        retry_body = retry_res.read()
+                        self.send_response(retry_res.status)
+                        self.send_header('Content-Type', retry_res.headers.get('Content-Type', 'application/json; charset=utf-8'))
+                        self.send_header('Content-Length', str(len(retry_body)))
+                        self.end_headers()
+                        self.wfile.write(retry_body)
+                        return
+                    except Exception:
+                        pass
+            if e.code in [401, 403] and renew_active_opener():
                 try:
                     retry_res = ACTIVE_OPENER.open(req, timeout=15)
                     retry_body = retry_res.read()
@@ -413,7 +460,6 @@ class PortalHandler(http.server.SimpleHTTPRequestHandler):
                     return
                 except Exception:
                     pass
-            err_body = e.read()
             self.send_response(e.code)
             self.send_header('Content-Type', e.headers.get('Content-Type', 'application/json; charset=utf-8'))
             self.send_header('Content-Length', str(len(err_body)))
@@ -524,8 +570,21 @@ class PortalHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         if parsed.path == '/api/logout':
+            global ACTIVE_OPENER, ACTIVE_COOKIE_JAR, ACTIVE_CSRF_TOKEN
+            headers_dict = {k: v for k, v in self.headers.items()}
+            cookie_str = self.headers.get("Cookie", "")
+            token = VibeSecAuthorizer.extract_token_from_request(headers_dict, cookie_str)
+            if token:
+                GLOBAL_SESSION_REGISTRY.pop(token, None)
+            ACTIVE_COOKIE_JAR = http.cookiejar.CookieJar()
+            ACTIVE_CSRF_TOKEN = None
+            ACTIVE_OPENER = urllib.request.build_opener(
+                urllib.request.HTTPCookieProcessor(ACTIVE_COOKIE_JAR),
+                urllib.request.HTTPSHandler(context=ACTIVE_SSL_CTX)
+            )
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
+            self.send_header('Set-Cookie', 'sfe_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax')
             self.end_headers()
             self.wfile.write(json.dumps({'success': True, 'message': 'Logged out successfully.'}).encode('utf-8'))
             return

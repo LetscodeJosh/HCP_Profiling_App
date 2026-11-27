@@ -156,7 +156,34 @@ class DataSanitizer {
     payload.forEach((key, value) {
       if (value is String) {
         final k = key.toLowerCase();
-        if (k.contains('name') || k.contains('middle')) {
+        final trimmed = value.trim();
+        final lowerVal = trimmed.toLowerCase();
+        final bool isPreservedKey = k.contains('signature') ||
+            k.contains('photo') ||
+            k.contains('image') ||
+            k.contains('url') ||
+            k.endsWith('_json') ||
+            k.endsWith('_html') ||
+            k == 'survey_response' ||
+            k == 'hcp_type' ||
+            k == 'hcp_name' ||
+            k == 'hcp_workplace' ||
+            k == 'workplace' ||
+            k == 'institution' ||
+            k == 'hcp_specialty' ||
+            k == 'sub_specialty' ||
+            k == 'account_or_program' ||
+            k == 'profile_action' ||
+            k == 'workflow_state' ||
+            k == 'survey_template';
+        final bool isPreservedValue = lowerVal.startsWith('data:image') ||
+            lowerVal.startsWith('http://') ||
+            lowerVal.startsWith('https://') ||
+            trimmed.startsWith('/files/') ||
+            trimmed.startsWith('/private/files/');
+        if (isPreservedKey || isPreservedValue) {
+          result[key] = trimmed;
+        } else if (k.contains('name') || k.contains('middle')) {
           result[key] = cleanTrimProper(value);
         } else if (k.contains('code') || k.contains('territory') || k.contains('status') || k.contains('prc') ||
             k == 'id' || k.endsWith('_id') || k.startsWith('id_') || k.contains('_id_')) {

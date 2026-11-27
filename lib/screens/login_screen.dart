@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/api_service.dart';
 import '../services/biometric_service.dart';
+import '../constants/app_version.dart';
 import 'doctor_account_screen.dart';
 import 'credits_screen.dart';
 
@@ -90,7 +91,7 @@ class _LoginScreenState extends State<LoginScreen> {
             position: apiService.userPosition.name,
             fullName: apiService.loggedInFullName,
           );
-        } else if (_enrolledOwner.isEmpty && (apiService.isAdmin || apiService.isManager)) {
+        } else if (_enrolledOwner.isEmpty && (apiService.isAdmin || apiService.isSfe || apiService.isManager)) {
           await BiometricService.saveCredentials(
             username,
             password,
@@ -301,80 +302,67 @@ class _LoginScreenState extends State<LoginScreen> {
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              // Apple Squircle Logo Container with Official App Logo
+                              // Official HCP Nexus Brand Logo & Sub-headers (Image 3)
                               Center(
-                                child: Container(
-                                  width: 80,
-                                  height: 80,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(22),
-                                    border: Border.all(
-                                      color: Colors.white.withOpacity(0.80),
-                                      width: 1.5,
+                                child: Image.asset(
+                                  'assets/hcp_nexus_login_emblem.png',
+                                  height: 74,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (context, error, stackTrace) => Container(
+                                    width: 74,
+                                    height: 74,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF0066FF),
+                                      borderRadius: BorderRadius.circular(20),
                                     ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: const Color(0xFF007AFF).withOpacity(0.35),
-                                        blurRadius: 20,
-                                        spreadRadius: 1,
-                                        offset: const Offset(0, 8),
-                                      ),
-                                    ],
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(21),
-                                    child: Image.asset(
-                                      'assets/app_logo.png',
-                                      width: 80,
-                                      height: 80,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (context, error, stackTrace) {
-                                        return Image.asset(
-                                          'assets/icon-512.png',
-                                          width: 80,
-                                          height: 80,
-                                          fit: BoxFit.cover,
-                                          errorBuilder: (context, error, stackTrace) => Container(
-                                            width: 80,
-                                            height: 80,
-                                            color: const Color(0xFF0066FF),
-                                            child: const Icon(
-                                              Icons.local_hospital_rounded,
-                                              color: Colors.white,
-                                              size: 40,
-                                            ),
-                                          ),
-                                        );
-                                      },
+                                    child: const Icon(
+                                      Icons.local_hospital_rounded,
+                                      color: Colors.white,
+                                      size: 40,
                                     ),
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 20),
-                              // App Title
-                              Text(
-                                'HCP Nexus',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Color(0xFF00458E),
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: -0.5,
+                              const SizedBox(height: 14),
+                              Center(
+                                child: Image.asset(
+                                  'assets/hcp_nexus_login_wordmark.png',
+                                  height: 34,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (context, error, stackTrace) => RichText(
+                                    textAlign: TextAlign.center,
+                                    text: const TextSpan(
+                                      style: TextStyle(
+                                        color: Color(0xFF07244C),
+                                        fontSize: 28,
+                                        letterSpacing: -0.5,
+                                      ),
+                                      children: [
+                                        TextSpan(
+                                          text: 'HCP ',
+                                          style: TextStyle(fontWeight: FontWeight.w800),
+                                        ),
+                                        TextSpan(
+                                          text: 'Nexus',
+                                          style: TextStyle(fontWeight: FontWeight.w400),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 6),
-                              Text(
-                                'Your Health Profile Buddy',
+                              const Text(
+                                'HEALTHCARE PROFESSIONAL NETWORK',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
-                                  color: const Color(0xFF1D1D1F).withOpacity(0.55),
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                  letterSpacing: -0.1,
+                                  color: Color(0xFF2C4766),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 1.8,
                                 ),
                               ),
-                              const SizedBox(height: 32),
+                              const SizedBox(height: 30),
 
                               // Username Field
                               Text(
@@ -684,6 +672,29 @@ class _LoginScreenState extends State<LoginScreen> {
                                   },
                                 ),
                               ],
+                              const SizedBox(height: 18),
+                              Center(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.info_outline_rounded,
+                                      size: 13,
+                                      color: const Color(0xFF00458E).withOpacity(0.65),
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      AppVersion.version,
+                                      style: TextStyle(
+                                        color: const Color(0xFF00458E).withOpacity(0.75),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: 0.6,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ],
                           ),
                         ),

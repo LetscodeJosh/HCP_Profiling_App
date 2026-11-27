@@ -1408,7 +1408,14 @@ class LocationResolver {
     }
   }
 
+  static void clearDynamicInstitutions() {
+    _dynamicInstitutions.clear();
+  }
+
   static void registerInstitutions(Iterable<Institution> list) {
+    if (list.length > 50) {
+      _dynamicInstitutions.clear();
+    }
     for (var i in list) {
       if (i.name.isNotEmpty && i.institutionName.isNotEmpty) {
         _dynamicInstitutions[i.name] = i.institutionName;
@@ -2185,6 +2192,20 @@ class LocationResolver {
       if (found.name.isNotEmpty) {
         if (found.isRejected) return '';
         return found.name;
+      }
+      // If a stale offline ID (e.g. INST-00001) was passed, map it via static label -> live ID
+      if (trimmed.toUpperCase().startsWith('INST-')) {
+        final staticHumanName = _staticInstitutions[trimmed.toUpperCase()];
+        if (staticHumanName != null && staticHumanName.isNotEmpty) {
+          final byHuman = dynamicInsts.firstWhere(
+            (i) => i.institutionName.toLowerCase() == staticHumanName.toLowerCase(),
+            orElse: () => Institution(name: '', institutionName: ''),
+          );
+          if (byHuman.name.isNotEmpty) {
+            if (byHuman.isRejected) return '';
+            return byHuman.name;
+          }
+        }
       }
     }
 
@@ -3565,12 +3586,29 @@ class LocationResolver {
   }) {
     Institution? instMatch;
     final wpInput = (workplaceNameOrId ?? institutionIdOrName ?? institutionName ?? '').trim();
-    if (wpInput.isNotEmpty) {
+    final wpNameHint = (institutionName ?? '').trim();
+    if (wpInput.isNotEmpty || wpNameHint.isNotEmpty) {
       final pool = institutions ?? _dynamicInstitutions.entries.map((e) => Institution(name: e.key, institutionName: e.value));
-      instMatch = pool.where((i) =>
-          i.name.toLowerCase() == wpInput.toLowerCase() ||
-          i.institutionName.toLowerCase() == wpInput.toLowerCase()
-      ).firstOrNull;
+      if (wpInput.isNotEmpty) {
+        instMatch = pool.where((i) =>
+            i.name.toLowerCase() == wpInput.toLowerCase() ||
+            i.institutionName.toLowerCase() == wpInput.toLowerCase()
+        ).firstOrNull;
+      }
+      if (instMatch == null && wpNameHint.isNotEmpty) {
+        instMatch = pool.where((i) =>
+            i.institutionName.toLowerCase() == wpNameHint.toLowerCase() ||
+            i.name.toLowerCase() == wpNameHint.toLowerCase()
+        ).firstOrNull;
+      }
+      if (instMatch == null && wpInput.toUpperCase().startsWith('INST-')) {
+        final staticHuman = _staticInstitutions[wpInput.toUpperCase()];
+        if (staticHuman != null && staticHuman.isNotEmpty) {
+          instMatch = pool.where((i) =>
+              i.institutionName.toLowerCase() == staticHuman.toLowerCase()
+          ).firstOrNull;
+        }
+      }
     }
 
     final effWpName = (institutionName != null && institutionName.trim().isNotEmpty)
@@ -3580,9 +3618,13 @@ class LocationResolver {
             : resolveInstitutionName(wpInput, institutions?.toList()));
     final effWpId = (instMatch != null && instMatch.name.isNotEmpty)
         ? instMatch.name
-        : resolveInstitutionId(wpInput, institutions?.toList());
+        : resolveInstitutionId(wpNameHint.isNotEmpty ? wpNameHint : wpInput, institutions?.toList());
     final finalWpName = effWpName.isNotEmpty ? effWpName : (wpInput.isNotEmpty ? wpInput : 'Workplace');
-    final finalWpId = effWpId.isNotEmpty ? effWpId : (wpInput.isNotEmpty ? wpInput : 'INST-00001');
+    final finalWpId = effWpId.isNotEmpty
+        ? effWpId
+        : (wpInput.isNotEmpty
+            ? wpInput
+            : ((institutions != null && institutions.isNotEmpty) ? institutions.first.name : 'INST-00001'));
 
     final givenCity = (cityIdOrName != null && cityIdOrName.trim().isNotEmpty && cityIdOrName.trim() != '-')
         ? cityIdOrName.trim()

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
@@ -867,29 +869,8 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
     );
   }
 
-  String _pointsToSvgDataUri(List<Offset> points, Size canvasSize) {
-    if (points.isEmpty) return '';
-    StringBuffer svg = StringBuffer();
-    svg.write('<svg xmlns="http://www.w3.org/2000/svg" width="${canvasSize.width}" height="${canvasSize.height}" viewBox="0 0 ${canvasSize.width} ${canvasSize.height}">');
-    svg.write('<path d="');
-    bool newPath = true;
-    for (var point in points) {
-      if (point == Offset.infinite) {
-        newPath = true;
-      } else {
-        if (newPath) {
-          svg.write('M ${point.dx} ${point.dy} ');
-          newPath = false;
-        } else {
-          svg.write('L ${point.dx} ${point.dy} ');
-        }
-      }
-    }
-    svg.write('" fill="none" stroke="black" stroke-width="3" stroke-linecap="round"/>');
-    svg.write('</svg>');
-    final bytes = utf8.encode(svg.toString());
-    return 'data:image/svg+xml;base64,${base64Encode(bytes)}';
-  }
+  Future<String> _pointsToPngDataUri(List<Offset> points) =>
+      renderSignaturePointsToPngDataUri(points);
 
   bool _hasUnapprovedWorkplaces() {
     final apiService = Provider.of<ApiService>(context, listen: false);
@@ -1047,7 +1028,7 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
     setState(() => _isLoading = true);
     final apiService = Provider.of<ApiService>(context, listen: false);
 
-    final sigUri = _pointsToSvgDataUri(_signaturePoints.value, const Size(300, 150));
+    final sigUri = await _pointsToPngDataUri(_signaturePoints.value);
     String? uploadedConsentPhotoUrl;
     if (_consentPhotoBytes != null || _consentPhotoFile != null) {
       try {
@@ -1530,29 +1511,33 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
           AppLogger.d('HcpWizard', 'Error updating master doctor record: $e');
         }
 
-        // Also sync HCP Account directly for existing doctor
-        await apiService.syncHcpAccount(
-          hcpId: effectiveHcpId,
-          hcpFullName: fullDoctorName,
-          program: _selectedProgram,
-          territory: _selectedTerritory,
-          salesPerson: _territoryManagerController.text.trim().isNotEmpty
-              ? _territoryManagerController.text.trim()
-              : apiService.getTerritoryManagerForTerritory(_selectedTerritory),
-          userId: apiService.loggedInEmail,
-          specialties: _selectedSpecialties.where((e) => e.hcpSpecialty != null).map((e) => HcpAccountSpecialization(hcpSpecialty: e.hcpSpecialty!, subSpecialty: e.subSpecialty, isPrimary: e.preferred, preferred: e.preferred)).toList(),
-          workplaces: verifiedWorkplaces.where((e) => e.hcpWorkplace != null).map((e) {
-            return HcpAccountWorkplace(
-              hcpWorkplace: e.hcpWorkplace!,
-              cityMunicipality: e.cityMunicipality,
-              provinceName: e.provinceName,
-              address: e.workplaceName ?? e.hcpWorkplace,
-              isPrimary: e.preferred,
-              preferred: e.preferred,
-            );
-          }).toList(),
-          contacts: _contacts.where((e) => ((e.contactNumber != null && e.contactNumber!.isNotEmpty) || (e.emailAddress != null && e.emailAddress!.isNotEmpty))).map((e) => HcpAccountContact(contactNumber: e.contactNumber, emailAddress: e.emailAddress, isPrimary: e.preferred, preferred: e.preferred)).toList(),
-        );
+        // Also sync HCP Account directly for existing doctor (non-blocking pre-sync; createSubmission also triggers processExistingSubmission)
+        try {
+          await apiService.syncHcpAccount(
+            hcpId: effectiveHcpId,
+            hcpFullName: fullDoctorName,
+            program: _selectedProgram,
+            territory: _selectedTerritory,
+            salesPerson: _territoryManagerController.text.trim().isNotEmpty
+                ? _territoryManagerController.text.trim()
+                : apiService.getTerritoryManagerForTerritory(_selectedTerritory),
+            userId: apiService.loggedInEmail,
+            specialties: _selectedSpecialties.where((e) => e.hcpSpecialty != null).map((e) => HcpAccountSpecialization(hcpSpecialty: e.hcpSpecialty!, subSpecialty: e.subSpecialty, isPrimary: e.preferred, preferred: e.preferred)).toList(),
+            workplaces: verifiedWorkplaces.where((e) => e.hcpWorkplace != null).map((e) {
+              return HcpAccountWorkplace(
+                hcpWorkplace: e.hcpWorkplace!,
+                cityMunicipality: e.cityMunicipality,
+                provinceName: e.provinceName,
+                address: e.workplaceName ?? e.hcpWorkplace,
+                isPrimary: e.preferred,
+                preferred: e.preferred,
+              );
+            }).toList(),
+            contacts: _contacts.where((e) => ((e.contactNumber != null && e.contactNumber!.isNotEmpty) || (e.emailAddress != null && e.emailAddress!.isNotEmpty))).map((e) => HcpAccountContact(contactNumber: e.contactNumber, emailAddress: e.emailAddress, isPrimary: e.preferred, preferred: e.preferred)).toList(),
+          );
+        } catch (e) {
+          AppLogger.d('HcpWizard', 'Pre-submission HCP Account sync notice: $e');
+        }
       }
 
       final submission = HcpProfileSubmission(
@@ -1591,26 +1576,35 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
         validFrom: HcpAccount.calculateMonthValidFrom(actualSubmissionTime),
         validTo: HcpAccount.calculateMonthValidTo(actualSubmissionTime),
         validityPeriod: HcpAccount.calculateMonthLabel(actualSubmissionTime),
-        workflowState: targetWorkflow,
-        status: targetWorkflow,
+        workflowState: widget.isResubmission
+            ? (widget.existingSubmission?.workflowState ?? 'Draft')
+            : targetWorkflow,
+        status: widget.isResubmission
+            ? (widget.existingSubmission?.status ?? 'Draft')
+            : targetWorkflow,
         applicationStatus: targetAppStatus,
         changeSummaryHtml: changeSummaryHtmlStr,
         changesJson: changesJsonStr,
-        docstatus: targetDocstatus,
+        docstatus: widget.isResubmission ? 0 : targetDocstatus,
       );
 
-      // Handle Resubmission: update existing document and apply workflow transition to Pending Approval
+      // Handle Resubmission: update existing document and apply workflow transition matching profile_action
       if (widget.isResubmission && widget.existingSubmission?.name != null) {
         final submissionName = widget.existingSubmission!.name!;
+        final resubAction = _isCreatingNewDoctor ? 'Submit for Approval' : 'Submit for Processing';
         final updatedDoc = await apiService.updateSubmission(submissionName, submission);
-        await apiService.applyWorkflowAction(updatedDoc, 'Submit for Approval');
+        await apiService.applyWorkflowAction(updatedDoc, resubAction);
 
         setState(() => _isLoading = false);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              backgroundColor: Color(0xFFD97706),
-              content: Text('Doctor profile resubmitted for approval (Status: Pending Approval)!'),
+            SnackBar(
+              backgroundColor: _isCreatingNewDoctor ? const Color(0xFFD97706) : const Color(0xFF10B981),
+              content: Text(
+                _isCreatingNewDoctor
+                    ? 'Doctor profile resubmitted for approval (Status: Pending Approval)!'
+                    : 'Doctor profile updated and processed (Status: Processed)!',
+              ),
             ),
           );
           Navigator.of(context).pop(true);
@@ -1640,7 +1634,10 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
       setState(() => _isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to submit: $e')),
+          SnackBar(
+            backgroundColor: const Color(0xFFDC2626),
+            content: Text(ApiService.formatUserFriendlyError(e, actionLabel: 'submit doctor profile')),
+          ),
         );
       }
     }
@@ -3190,7 +3187,7 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
       'Step 1',
       'Step 2',
       'Step 3',
-      'Changes',
+      'Review',
     ];
   }
 
@@ -3225,7 +3222,7 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
                       SnackBar(
                         backgroundColor: const Color(0xFF0284C7),
                         content: Text(
-                          'No questionnaire configured for "$_selectedProgram" — redirected to Changes.',
+                          'No questionnaire configured for "$_selectedProgram" — redirected to Review.',
                           style: const TextStyle(fontSize: 12.5),
                         ),
                         duration: const Duration(seconds: 2),
@@ -5908,7 +5905,7 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Please update the doctor details according to the manager\'s note above, then proceed to the Changes tab to resubmit.',
+            'Please update the doctor details according to the manager\'s note above, then proceed to the Review tab to resubmit.',
             style: TextStyle(color: Color(0xFF7F1D1D), fontSize: 11.5, fontStyle: FontStyle.italic),
           ),
         ],
@@ -6662,7 +6659,7 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         backgroundColor: const Color(0xFF0284C7),
-                        content: Text('No questionnaire configured for "$_selectedProgram" — proceeding to Changes.'),
+                        content: Text('No questionnaire configured for "$_selectedProgram" — proceeding to Review.'),
                         duration: const Duration(seconds: 2),
                       ),
                     );
@@ -6680,6 +6677,88 @@ class _HcpWizardScreenState extends State<HcpWizardScreen> {
   }
 }
 
+/// Renders drawn signature stroke points to a crisp white-background PNG data URI
+/// compatible with ERPNext v15 Desk Attach Image fields and mobile clients.
+Future<String> renderSignaturePointsToPngDataUri(
+  List<Offset> points, {
+  int width = 600,
+  int height = 240,
+}) async {
+  final strokes = <List<Offset>>[];
+  List<Offset> current = [];
+  double minX = double.infinity, minY = double.infinity;
+  double maxX = -double.infinity, maxY = -double.infinity;
+
+  for (final pt in points) {
+    if (!pt.dx.isFinite || !pt.dy.isFinite) {
+      if (current.isNotEmpty) {
+        strokes.add(current);
+        current = [];
+      }
+      continue;
+    }
+    current.add(pt);
+    if (pt.dx < minX) minX = pt.dx;
+    if (pt.dx > maxX) maxX = pt.dx;
+    if (pt.dy < minY) minY = pt.dy;
+    if (pt.dy > maxY) maxY = pt.dy;
+  }
+  if (current.isNotEmpty) {
+    strokes.add(current);
+  }
+  if (strokes.isEmpty) return '';
+
+  const double padding = 24.0;
+  final double bboxW = (maxX - minX) < 1.0 ? 1.0 : (maxX - minX);
+  final double bboxH = (maxY - minY) < 1.0 ? 1.0 : (maxY - minY);
+  final double availW = (width - padding * 2).clamp(1.0, double.infinity);
+  final double availH = (height - padding * 2).clamp(1.0, double.infinity);
+  final double scale = math.min(availW / bboxW, availH / bboxH).clamp(0.1, 2.5);
+  final double offsetX = (width - bboxW * scale) / 2.0 - minX * scale;
+  final double offsetY = (height - bboxH * scale) / 2.0 - minY * scale;
+
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+
+  final bgPaint = Paint()..color = Colors.white;
+  canvas.drawRect(Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()), bgPaint);
+
+  final strokePaint = Paint()
+    ..color = const Color(0xFF0F172A)
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round
+    ..strokeWidth = 3.5
+    ..style = PaintingStyle.stroke;
+
+  final dotPaint = Paint()
+    ..color = const Color(0xFF0F172A)
+    ..style = PaintingStyle.fill;
+
+  for (final stroke in strokes) {
+    if (stroke.length == 1) {
+      final p = Offset(stroke.first.dx * scale + offsetX, stroke.first.dy * scale + offsetY);
+      canvas.drawCircle(p, 2.0, dotPaint);
+    } else {
+      final path = Path()
+        ..moveTo(stroke.first.dx * scale + offsetX, stroke.first.dy * scale + offsetY);
+      for (int i = 1; i < stroke.length; i++) {
+        path.lineTo(stroke[i].dx * scale + offsetX, stroke[i].dy * scale + offsetY);
+      }
+      canvas.drawPath(path, strokePaint);
+    }
+  }
+
+  final picture = recorder.endRecording();
+  final img = await picture.toImage(width, height);
+  try {
+    final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData == null) return '';
+    return 'data:image/png;base64,${base64Encode(byteData.buffer.asUint8List())}';
+  } finally {
+    img.dispose();
+  }
+}
+
 class SignatureCanvas extends StatefulWidget {
   final ValueNotifier<List<Offset>> pointsNotifier;
   const SignatureCanvas({Key? key, required this.pointsNotifier}) : super(key: key);
@@ -6692,6 +6771,11 @@ class _SignatureCanvasState extends State<SignatureCanvas> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
+      onPanStart: (details) {
+        RenderBox renderBox = context.findRenderObject() as RenderBox;
+        Offset localPosition = renderBox.globalToLocal(details.globalPosition);
+        widget.pointsNotifier.value = List.from(widget.pointsNotifier.value)..add(localPosition);
+      },
       onPanUpdate: (details) {
         RenderBox renderBox = context.findRenderObject() as RenderBox;
         Offset localPosition = renderBox.globalToLocal(details.globalPosition);
@@ -6723,10 +6807,19 @@ class SignaturePainter extends CustomPainter {
       ..color = const Color(0xFF0F172A)
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 3.0;
+    Paint dotPaint = Paint()
+      ..color = const Color(0xFF0F172A)
+      ..style = PaintingStyle.fill;
 
-    for (int i = 0; i < points.length - 1; i++) {
-      if (points[i] != Offset.infinite && points[i + 1] != Offset.infinite) {
-        canvas.drawLine(points[i], points[i + 1], paint);
+    for (int i = 0; i < points.length; i++) {
+      final curr = points[i];
+      if (!curr.dx.isFinite || !curr.dy.isFinite) continue;
+      final hasNext = (i + 1 < points.length) && points[i + 1].dx.isFinite && points[i + 1].dy.isFinite;
+      final hasPrev = (i - 1 >= 0) && points[i - 1].dx.isFinite && points[i - 1].dy.isFinite;
+      if (hasNext) {
+        canvas.drawLine(curr, points[i + 1], paint);
+      } else if (!hasPrev) {
+        canvas.drawCircle(curr, 1.8, dotPaint);
       }
     }
   }

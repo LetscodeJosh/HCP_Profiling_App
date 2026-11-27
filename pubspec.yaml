@@ -1,6 +1,6 @@
 name: hcp_profiling
 description: A Flutter app for HCP Nexus interfacing with ERPNext v15.
-version: 1.0.1+2
+version: 1.0.2+3
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -49,6 +49,9 @@ flutter:
     - assets/
     - assets/app_logo.png
     - assets/app_logo_transparent.png
+    - assets/hcp_nexus_menu_logo.png
+    - assets/hcp_nexus_login_emblem.png
+    - assets/hcp_nexus_login_wordmark.png
     - assets/icon-192.png
     - assets/icon-512.png
     - assets/medical_bg.jpg

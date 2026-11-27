@@ -7,7 +7,7 @@ import '../login_screen.dart';
 import '../doctor_account_screen.dart';
 import '../institution_approvals_screen.dart';
 import '../institution_directory_screen.dart';
-import '../../constants/app_version.dart';
+import 'user_initials_avatar.dart';
 
 enum DrawerItem {
   dashboard,
@@ -52,59 +52,22 @@ class AppDrawer extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0A2259),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFF38BDF8), width: 1.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.asset(
-                          'assets/app_logo.png',
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Image.asset(
-                              'assets/icon-512.png',
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) => Container(
-                                color: const Color(0xFF0066FF),
-                                child: const Icon(Icons.local_hospital_rounded, color: Colors.white, size: 28),
-                              ),
-                            );
-                          },
-                        ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Image.asset(
+                    'assets/hcp_nexus_menu_logo.png',
+                    height: 44,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) => const Text(
+                      'HCP Nexus',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
                       ),
                     ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
-                            'HCP Nexus',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
                 const SizedBox(height: 18),
                     Container(
@@ -115,7 +78,7 @@ class AppDrawer extends StatelessWidget {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.person_pin_rounded, color: Color(0xFF38BDF8), size: 22),
+                          UserInitialsAvatar(apiService: apiService, size: 36),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
@@ -179,7 +142,36 @@ class AppDrawer extends StatelessWidget {
                                   ),
                                 ),
                                 const SizedBox(height: 6),
-                                if (apiService.isAdmin || apiService.isSfe)
+                                if (apiService.isSfe) ...[
+                                  if ((apiService.employeeBranch ?? '').trim().isNotEmpty) ...[
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF0F172A),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: const Color(0xFF334155), width: 0.8),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.apartment_rounded, size: 12, color: Color(0xFF94A3B8)),
+                                          const SizedBox(width: 5),
+                                          Flexible(
+                                            child: Text(
+                                              apiService.employeeBranch!.trim(),
+                                              style: const TextStyle(
+                                                color: Color(0xFFE2E8F0),
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                  ],
                                   InkWell(
                                     onTap: () {
                                       showDialog(
@@ -256,33 +248,45 @@ class AppDrawer extends StatelessWidget {
                                         ],
                                       ),
                                     ),
-                                  )
+                                  ),
+                                ]
                                 else
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF0F172A),
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: const Color(0xFF334155), width: 0.8),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Icon(Icons.business_center_rounded, size: 12, color: Color(0xFF94A3B8)),
-                                        const SizedBox(width: 5),
-                                        Flexible(
-                                          child: Text(
-                                            apiService.selectedProgram,
-                                            style: const TextStyle(
-                                              color: Color(0xFFE2E8F0),
-                                              fontSize: 10.5,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
+                                  Builder(
+                                    builder: (context) {
+                                      final branchLabel = (apiService.employeeBranch ?? '').trim();
+                                      final deptLabel = (apiService.employeeDepartment ?? '').trim();
+                                      final staticLabel = apiService.isAdmin
+                                          ? (branchLabel.isNotEmpty
+                                              ? branchLabel
+                                              : (deptLabel.isNotEmpty ? deptLabel : apiService.selectedProgram))
+                                          : apiService.selectedProgram;
+                                      return Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF0F172A),
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(color: const Color(0xFF334155), width: 0.8),
                                         ),
-                                      ],
-                                    ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.business_center_rounded, size: 12, color: Color(0xFF94A3B8)),
+                                            const SizedBox(width: 5),
+                                            Flexible(
+                                              child: Text(
+                                                staticLabel,
+                                                style: const TextStyle(
+                                                  color: Color(0xFFE2E8F0),
+                                                  fontSize: 10.5,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
                                   ),
                               ],
                             ),
@@ -405,27 +409,6 @@ class AppDrawer extends StatelessWidget {
                   ],
                 ),
               ),
-
-          // App Version & Credits (Just above Log Out)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.info_outline_rounded, color: Color(0xFF64748B), size: 14),
-                const SizedBox(width: 6),
-                Text(
-                  AppVersion.version,
-                  style: const TextStyle(
-                    color: Color(0xFF94A3B8),
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-              ],
-            ),
-          ),
 
           const Divider(color: Color(0xFF1E293B), height: 1),
 

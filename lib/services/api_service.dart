@@ -30,6 +30,9 @@ class ApiService extends ChangeNotifier {
     _startAutoSyncTimer();
   }
 
+  @visibleForTesting
+  ApiService.forTest();
+
   // System Administrator Accounts (Identical functionality, purposes, counts, and permissions)
   static const Set<String> administratorEmails = {
     'lesantos@pims-marketing.com',
@@ -62,6 +65,7 @@ class ApiService extends ChangeNotifier {
   String? employeeBranch;
 
   bool _sfeModeOverride = false;
+  bool _hasSfeRole = false;
   bool get sfeModeOverride => _sfeModeOverride;
   void toggleSfeMode() {
     if (_userPosition != UserPosition.admin && _userPosition != UserPosition.sfe) {
@@ -74,7 +78,8 @@ class ApiService extends ChangeNotifier {
   bool get isAdmin => _userPosition == UserPosition.admin && !_sfeModeOverride;
   bool get isManager => _userPosition == UserPosition.manager && !_sfeModeOverride;
   bool get isMedRep => _userPosition == UserPosition.medRep && !_sfeModeOverride;
-  bool get isSfe => _userPosition == UserPosition.sfe || (_userPosition == UserPosition.admin && _sfeModeOverride);
+  bool get isSfe => _userPosition == UserPosition.sfe || _hasSfeRole || (_userPosition == UserPosition.admin && _sfeModeOverride);
+  bool get hasSfeRole => _hasSfeRole;
   bool get canManageAllDoctypes => isAdmin || isSfe;
   bool get canCreateOrEditDoctor => isAdmin || isSfe;
   bool get canCreateOrEditDoctorAccount => isAdmin || isSfe;
@@ -95,15 +100,15 @@ class ApiService extends ChangeNotifier {
 
   /// Returns clean short / acronym title for the designation (e.g. Sales Rep, PHSR, PHSS, DSM, GM, etc.)
   String get userDesignationTitle {
-    if (isSfe) return 'SFE';
-    if (_userDesignation.isEmpty) {
-      return userPositionTitle;
-    }
     final des = _userDesignation.trim();
     final lower = des.toLowerCase();
+    if (lower.contains('sales force effectiveness manager')) return 'SFE Mgr';
+    if (isSfe) return 'SFE';
+    if (des.isEmpty) {
+      return userPositionTitle;
+    }
 
     // Exact PMII / PIMS ERPNext Designations
-    if (lower.contains('sales force effectiveness manager')) return 'SFE Mgr';
     if (lower.contains('sales force effectiveness') || lower == 'sfe') return 'SFE';
     if (lower == 'sales representative') return 'Sales Rep';
     if (lower.contains('professional health specialist representative') || lower == 'phsr') return 'PHSR';
@@ -144,6 +149,128 @@ class ApiService extends ChangeNotifier {
     return des;
   }
 
+  /// Converts raw exceptions / Frappe HTTP tracebacks into a concise, plain-English
+  /// message for non-technical users, appended only with a clean `(Exception Error: <code>)` tag.
+  static String formatUserFriendlyError(Object error, {String? actionLabel}) {
+    final raw = error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '').trim();
+    final lower = raw.toLowerCase();
+
+    // Preserve clear, intentional in-app validation messages that contain no raw JSON/tracebacks
+    if (!raw.contains('{') &&
+        !lower.contains('traceback') &&
+        !lower.contains('http ') &&
+        !lower.contains('rpc ') &&
+        !lower.contains('socketexception') &&
+        !lower.contains('clientexception') &&
+        !lower.contains('timeoutexception') &&
+        (lower.startsWith('cannot submit') ||
+            lower.startsWith('please ') ||
+            lower.startsWith('offline '))) {
+      return raw;
+    }
+
+    // Extract clean 3-digit HTTP status code if present
+    String? statusCode;
+    final preferredCodeMatch = RegExp(
+      r'(?:http|rpc|status|submission|account|doctor|error)\s*[:=]?\s*(400|401|403|404|408|409|413|417|422|429|500|502|503|504)\b',
+      caseSensitive: false,
+    ).firstMatch(raw);
+    if (preferredCodeMatch != null) {
+      statusCode = preferredCodeMatch.group(1);
+    } else {
+      final anyCodeMatch = RegExp(r'\b(400|401|403|404|408|409|413|417|422|429|500|502|503|504)\b').firstMatch(raw);
+      statusCode = anyCodeMatch?.group(1);
+    }
+    final codeSuffix = statusCode != null ? ' (Exception Error: $statusCode)' : '';
+
+    if (lower.contains('socketexception') ||
+        lower.contains('failed host lookup') ||
+        lower.contains('network is unreachable') ||
+        lower.contains('connection refused') ||
+        lower.contains('connection reset') ||
+        lower.contains('clientexception')) {
+      return 'Unable to reach the server. Please check your internet connection and try again.$codeSuffix';
+    }
+    if (lower.contains('timeoutexception') || lower.contains('timed out') || statusCode == '408') {
+      return 'The request took too long to respond. Please check your connection and try again.${statusCode != null ? codeSuffix : ' (Exception Error: 408)'}';
+    }
+    if (lower.contains('csrftokenerror') || lower.contains('csrf')) {
+      return 'Your security session needs a quick refresh. Please try again.${statusCode != null ? codeSuffix : ' (Exception Error: 400)'}';
+    }
+    if (statusCode == '401' || statusCode == '403' || lower.contains('permissionerror') || lower.contains('not permitted')) {
+      return 'Your session expired or your account does not have permission for this action. Please sign in again.$codeSuffix';
+    }
+    if (statusCode == '404' || lower.contains('doesnotexisterror')) {
+      return 'The selected record could not be found on the server. Please refresh and try again.$codeSuffix';
+    }
+    if (statusCode == '417' || lower.contains('linkvalidationerror') || lower.contains('validationerror')) {
+      final errCode = statusCode ?? '417';
+      if (lower.contains('workplace') || lower.contains('institution')) {
+        return 'The selected workplace could not be verified on the server. Please re-select the institution and try again. (Exception Error: $errCode)';
+      }
+      if (lower.contains('specialty') || lower.contains('sub_specialty') || lower.contains('sub specialty')) {
+        return 'The selected specialization could not be verified on the server. Please re-select it and try again. (Exception Error: $errCode)';
+      }
+      if (lower.contains('duplicate') || lower.contains('already exists') || lower.contains('unique')) {
+        return 'This record already exists on the server. Please refresh the list to check existing entries. (Exception Error: $errCode)';
+      }
+      if (lower.contains('email')) {
+        return 'Please enter a valid email address before submitting. (Exception Error: $errCode)';
+      }
+      if (lower.contains('mandatory') || lower.contains('missing')) {
+        return 'Some required details are missing. Please review the form and try again. (Exception Error: $errCode)';
+      }
+      return 'The server could not save this entry because one of the details is invalid. Please review the form and try again. (Exception Error: $errCode)';
+    }
+    if (statusCode == '500' || statusCode == '502' || statusCode == '503' || statusCode == '504') {
+      return 'The server is temporarily unavailable. Please wait a moment and try again.$codeSuffix';
+    }
+
+    final prefix = (actionLabel != null && actionLabel.trim().isNotEmpty)
+        ? 'Unable to $actionLabel right now. Please try again.'
+        : 'Unable to complete your request right now. Please try again.';
+    return '$prefix$codeSuffix';
+  }
+
+  /// Computes 1-2 letter uppercase initials from full name (first word + last word),
+  /// e.g. "Joshua Tan" -> "JT", "Dexter Huinda" -> "DH", "Allen Paul Miole" -> "AM".
+  static String computeInitials(String? fullName, {String? email}) {
+    final cleanName = (fullName ?? '').trim();
+    if (cleanName.isNotEmpty) {
+      final parts = cleanName
+          .split(RegExp(r'\s+'))
+          .map((p) => p.replaceAll(RegExp(r'[^A-Za-z0-9]'), ''))
+          .where((p) => p.isNotEmpty)
+          .toList();
+      if (parts.length >= 2) {
+        return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+      }
+      if (parts.length == 1) {
+        final w = parts.first;
+        return (w.length >= 2 ? w.substring(0, 2) : w).toUpperCase();
+      }
+    }
+    final cleanEmail = (email ?? '').trim();
+    if (cleanEmail.isNotEmpty) {
+      final local = cleanEmail.split('@').first;
+      final parts = local
+          .split(RegExp(r'[._\-]+'))
+          .map((p) => p.replaceAll(RegExp(r'[^A-Za-z0-9]'), ''))
+          .where((p) => p.isNotEmpty)
+          .toList();
+      if (parts.length >= 2) {
+        return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+      }
+      if (parts.length == 1) {
+        final w = parts.first;
+        return (w.length >= 2 ? w.substring(0, 2) : w).toUpperCase();
+      }
+    }
+    return 'U';
+  }
+
+  String get userInitials => computeInitials(loggedInFullName, email: loggedInEmail);
+
   String selectedProgram = 'COREnergy';
   List<String> availablePrograms = [
     'Abbott Diabetes Care',
@@ -180,6 +307,14 @@ class ApiService extends ChangeNotifier {
   bool get isOffline => _isOffline;
 
   Timer? _autoSyncTimer;
+  bool _isDisposed = false;
+
+  @override
+  void notifyListeners() {
+    if (!_isDisposed) {
+      super.notifyListeners();
+    }
+  }
 
   void _startAutoSyncTimer() {
     _autoSyncTimer?.cancel();
@@ -199,6 +334,7 @@ class ApiService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _isDisposed = true;
     _autoSyncTimer?.cancel();
     super.dispose();
   }
@@ -323,15 +459,54 @@ class ApiService extends ChangeNotifier {
 
   static String get devServerUrl => AppConfig.serverUrl;
   static const String _keyServerUrl = 'hcp_saved_server_url';
+  static const String _keyLastBaseUrl = 'hcp_last_active_base_url';
 
   String _baseUrl = AppConfig.serverUrl;
   String get baseUrl => _baseUrl;
+
+  Future<void> _purgeAllEnvironmentCaches() async {
+    const envScopedCaches = [
+      'institutions_cache.json',
+      'doctors_cache.json',
+      'hcp_accounts_cache.json',
+      'submissions_cache.json',
+      'specializations_cache.json',
+      'psgc_cache.json',
+      'employee_profile_cache.json',
+      'frappe_HCP_list.json',
+      'frappe_HCP_Account_list.json',
+      'frappe_HCP_Profile_Submission_list.json',
+      'frappe_Institution_list.json',
+      'frappe_Specialization_list.json',
+      'frappe_Territory_list.json',
+    ];
+    for (final filename in envScopedCaches) {
+      try {
+        final f1 = await _getCacheFile(filename);
+        if (await f1.exists()) await f1.delete();
+        final f2 = await _getLegacyCacheFile(filename);
+        if (await f2.exists()) await f2.delete();
+      } catch (_) {}
+    }
+    _institutionsLoadedFromServer = false;
+    _cachedInstitutions = [];
+    _cachedDoctors = [];
+    _cachedHcpAccounts = [];
+    _cachedSubmissions = [];
+    LocationResolver.clearDynamicInstitutions();
+  }
 
   Future<void> initServerConfig() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_keyServerUrl);
       _baseUrl = AppConfig.serverUrl;
+      final lastBaseUrl = (prefs.getString(_keyLastBaseUrl) ?? '').trim();
+      if (lastBaseUrl != _baseUrl) {
+        await _purgeAllEnvironmentCaches();
+        await prefs.setString(_keyLastBaseUrl, _baseUrl);
+        AppLogger.i('ApiService', 'Purged stale cross-environment disk caches for $_baseUrl');
+      }
     } catch (_) {}
   }
 
@@ -340,9 +515,11 @@ class ApiService extends ChangeNotifier {
       _baseUrl = url;
       _sessionCookie = null;
       _csrfToken = null;
+      await _purgeAllEnvironmentCaches();
       try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(_keyServerUrl, url);
+        await prefs.setString(_keyLastBaseUrl, url);
       } catch (_) {}
       notifyListeners();
     }
@@ -506,6 +683,23 @@ class ApiService extends ChangeNotifier {
           if (savedCreds['full_name'] != null && savedCreds['full_name']!.isNotEmpty) {
             loggedInFullName = savedCreds['full_name']!;
           }
+          try {
+            final cachedEmp = await _readFromCache('employee_profile_cache.json');
+            if (cachedEmp != null) {
+              final empMap = jsonDecode(cachedEmp);
+              if (empMap is Map<String, dynamic>) {
+                employeeId ??= empMap['name']?.toString();
+                employeeReportsTo ??= empMap['reports_to']?.toString();
+                employeeCompany ??= empMap['company']?.toString();
+                employeeDepartment ??= empMap['department']?.toString();
+                employeeBranch ??= empMap['branch']?.toString();
+                final cachedDesig = empMap['designation']?.toString() ?? '';
+                if (_userDesignation.isEmpty && cachedDesig.isNotEmpty) {
+                  _userDesignation = cachedDesig;
+                }
+              }
+            }
+          } catch (_) {}
           final savedPos = savedCreds['position'] ?? '';
           _applyPositionFromRoleProfile(
             roleProfile: savedPos,
@@ -986,7 +1180,20 @@ class ApiService extends ChangeNotifier {
     final lowerRoleProfile = _userRoleProfile.toLowerCase();
     final lowerEmail = email.toLowerCase().trim();
     final lowerDesignation = _userDesignation.toLowerCase().trim();
+    final lowerDepartment = (employeeDepartment ?? '').toLowerCase().trim();
+    final lowerBranch = (employeeBranch ?? '').toLowerCase().trim();
     final normalizedRoles = roleNames.map((r) => r.toLowerCase().trim()).toList();
+
+    final bool detectedSfe =
+        normalizedRoles.any((r) => r == 'sales force effectiveness' || r == 'sfe' || r.contains('sales force effectiveness')) ||
+        lowerRoleProfile.contains('sales force effectiveness') ||
+        lowerRoleProfile.contains('sfe') ||
+        lowerDesignation.contains('sales force effectiveness') ||
+        lowerDesignation.contains('sfe') ||
+        lowerDepartment.contains('sales force effectiveness') ||
+        lowerDepartment.contains('sfe') ||
+        lowerBranch.startsWith('sfe');
+    _hasSfeRole = detectedSfe;
 
     // 1. System Manager / Administrator (Admin position - Allowed Role 1)
     if (administratorEmails.contains(lowerEmail) ||
@@ -1001,16 +1208,11 @@ class ApiService extends ChangeNotifier {
         lowerRoleProfile.contains('technical support')) {
       _userPosition = UserPosition.admin;
       _isRoleAuthorized = true;
-      if (_userRoleProfile.isEmpty) _userRoleProfile = 'Administrator';
-      if (_userDesignation.isEmpty) _userDesignation = 'Administrator';
+      if (_userRoleProfile.isEmpty) _userRoleProfile = detectedSfe ? 'Sales Force Effectiveness' : 'Administrator';
+      if (_userDesignation.isEmpty) _userDesignation = detectedSfe ? 'SFE Specialist' : 'Administrator';
     } 
-    // 2. Sales Force Effectiveness (SFE Specialist position - Institution Approver Only)
-    // SFE specialists only have access to Institution submission and MUST NOT see all program HCPs.
-    else if ((normalizedRoles.any((r) => r == 'sales force effectiveness' || r == 'sfe') ||
-              lowerRoleProfile.contains('sales force effectiveness') ||
-              lowerRoleProfile.contains('sfe') ||
-              lowerDesignation.contains('sales force effectiveness') ||
-              lowerDesignation.contains('sfe'))) {
+    // 2. Sales Force Effectiveness (SFE Specialist position)
+    else if (detectedSfe) {
       _userPosition = UserPosition.sfe;
       _isRoleAuthorized = true;
       if (_userRoleProfile.isEmpty) _userRoleProfile = 'Sales Force Effectiveness';
@@ -1076,6 +1278,32 @@ class ApiService extends ChangeNotifier {
     notifyListeners();
   }
 
+  @visibleForTesting
+  void applyPositionForTesting({
+    required String roleProfile,
+    required List<String> roleNames,
+    required String email,
+    String designation = '',
+    String? branch,
+    String? department,
+  }) {
+    loggedInEmail = email;
+    if (branch != null) employeeBranch = branch;
+    if (department != null) employeeDepartment = department;
+    _applyPositionFromRoleProfile(
+      roleProfile: roleProfile,
+      roleNames: roleNames,
+      email: email,
+      designation: designation,
+    );
+  }
+
+  @visibleForTesting
+  void setCachedInstitutionsForTesting(List<Institution> institutions) {
+    _cachedInstitutions = institutions;
+    notifyListeners();
+  }
+
   /// Log out and revoke server-side & local sessions
   void logout() {
     final activeCookie = _sessionCookie;
@@ -1093,10 +1321,13 @@ class ApiService extends ChangeNotifier {
     employeeBranch = null;
     _userPosition = UserPosition.medRep;
     _sfeModeOverride = false;
+    _hasSfeRole = false;
     _cachedDoctors = [];
     _cachedHcpAccounts = [];
     _cachedSubmissions = [];
     _cachedInstitutions = [];
+    _institutionsLoadedFromServer = false;
+    LocationResolver.clearDynamicInstitutions();
     AppLogger.clear();
     unawaited(TerritoryWebServer.stop());
     if (!wasOffline && activeCookie != null && activeCookie.isNotEmpty) {
@@ -1181,6 +1412,9 @@ class ApiService extends ChangeNotifier {
     }
   }
 
+  bool _institutionsLoadedFromServer = false;
+  bool get institutionsLoadedFromServer => _institutionsLoadedFromServer;
+
   Future<List<Institution>> fetchInstitutions() async {
     if (_isOffline) {
       final cache = await _readFromCache('institutions_cache.json');
@@ -1188,15 +1422,18 @@ class ApiService extends ChangeNotifier {
         try {
           final List<dynamic> dataList = jsonDecode(cache);
           final list = dataList.map((json) => Institution.fromJson(json)).toList();
+          LocationResolver.registerInstitutions(list);
           _cachedInstitutions = list;
           return list;
         } catch (_) {}
       }
       // Fallback to local asset
       try {
-        final String localData = await rootBundle.loadString('assets/institutions.json');
+        final String localData = (await rootBundle.loadString('assets/institutions.json')).replaceFirst('\uFEFF', '');
         final List<dynamic> dataList = jsonDecode(localData);
         final list = dataList.map((json) => Institution.fromJson(json)).toList();
+        _institutionsLoadedFromServer = false;
+        LocationResolver.registerInstitutions(list);
         _cachedInstitutions = list;
         return list;
       } catch (err) {
@@ -1213,7 +1450,22 @@ class ApiService extends ChangeNotifier {
             '$baseUrl/api/resource/Institution?fields=["name","institution_name","region_name","province_name","city_municipality","workflow_state","owner","creation","modified","docstatus"]&order_by=name%20desc&limit_start=$offset&limit_page_length=$pageSize',
           ),
       (offset) => Uri.parse(
+            '$baseUrl/api/resource/Institution?fields=["name","institution_name","region_name","province_name","city_municipality","workflow_state","owner"]&order_by=name%20desc&limit_start=$offset&limit_page_length=$pageSize',
+          ),
+      (offset) => Uri.parse(
+            '$baseUrl/api/resource/Institution?fields=["name","institution_name"]&order_by=name%20desc&limit_start=$offset&limit_page_length=$pageSize',
+          ),
+      (offset) => Uri.parse(
             '$baseUrl/api/method/frappe.client.get_list?doctype=Institution&fields=["*"]&order_by=name%20desc&limit_start=$offset&limit_page_length=$pageSize',
+          ),
+      (offset) => Uri.parse(
+            '$baseUrl/api/method/frappe.client.get_list?doctype=Institution&fields=["name","institution_name","region_name","province_name","city_municipality","workflow_state","owner","creation","modified"]&order_by=name%20desc&limit_start=$offset&limit_page_length=$pageSize',
+          ),
+      (offset) => Uri.parse(
+            '$baseUrl/api/method/frappe.client.get_list?doctype=Institution&fields=["name","institution_name","region_name","province_name","city_municipality","workflow_state"]&order_by=name%20desc&limit_start=$offset&limit_page_length=$pageSize',
+          ),
+      (offset) => Uri.parse(
+            '$baseUrl/api/method/frappe.client.get_list?doctype=Institution&fields=["name","institution_name"]&order_by=name%20desc&limit_start=$offset&limit_page_length=$pageSize',
           ),
     ];
 
@@ -1241,7 +1493,6 @@ class ApiService extends ChangeNotifier {
               : (body['message'] is List
                   ? body['message'] as List<dynamic>
                   : const []);
-          tierSucceeded = true;
 
           int addedInPage = 0;
           for (final item in rawList) {
@@ -1255,6 +1506,10 @@ class ApiService extends ChangeNotifier {
             }
           }
 
+          if (addedInPage > 0) {
+            tierSucceeded = true;
+          }
+
           if (rawList.isEmpty || addedInPage == 0) {
             break;
           }
@@ -1263,21 +1518,175 @@ class ApiService extends ChangeNotifier {
             break;
           }
           // Stop cleanly when server returned fewer rows than requested,
-          // unless the server appears to apply a small 20/100 page cap.
+          // unless the server applies a common small page cap (20/50/100/200/250).
           if (rawList.length < pageSize &&
               rawList.length != 20 &&
-              rawList.length != 100) {
+              rawList.length != 50 &&
+              rawList.length != 100 &&
+              rawList.length != 200 &&
+              rawList.length != 250) {
             break;
           }
         }
 
-        if (tierSucceeded) {
+        if (tierSucceeded && uniqueByName.isNotEmpty) {
           fetchedAny = true;
           break;
         }
       }
 
-      if (fetchedAny) {
+      // Desk ReportView fallback (for Sales User / MedRep roles blocked from direct resource list endpoints)
+      if (!fetchedAny) {
+        await ensureCsrfToken();
+        int offset = 0;
+        while (true) {
+          try {
+            final rvPayload = jsonEncode({
+              'doctype': 'Institution',
+              'fields': [
+                '`tabInstitution`.`name`',
+                '`tabInstitution`.`institution_name`',
+                '`tabInstitution`.`region_name`',
+                '`tabInstitution`.`province_name`',
+                '`tabInstitution`.`city_municipality`',
+                '`tabInstitution`.`workflow_state`',
+                '`tabInstitution`.`owner`',
+                '`tabInstitution`.`creation`',
+                '`tabInstitution`.`modified`',
+              ],
+              'order_by': '`tabInstitution`.`name` desc',
+              'start': offset,
+              'page_length': pageSize,
+            });
+            var rvRes = await http
+                .post(
+                  Uri.parse('$baseUrl/api/method/frappe.desk.reportview.get'),
+                  headers: _headers,
+                  body: rvPayload,
+                )
+                .timeout(const Duration(seconds: 15));
+            if (rvRes.statusCode == 400 && rvRes.body.contains('CSRFTokenError')) {
+              _csrfToken = null;
+              await ensureCsrfToken();
+              rvRes = await http
+                  .post(
+                    Uri.parse('$baseUrl/api/method/frappe.desk.reportview.get'),
+                    headers: _headers,
+                    body: rvPayload,
+                  )
+                  .timeout(const Duration(seconds: 15));
+            }
+            lastStatusCode = rvRes.statusCode;
+            if (rvRes.statusCode != 200) break;
+            final rvBody = jsonDecode(rvRes.body);
+            final msg = rvBody is Map ? rvBody['message'] : null;
+            if (msg is Map && msg['keys'] is List && msg['values'] is List) {
+              final keys = (msg['keys'] as List).map((k) => k.toString()).toList();
+              final values = msg['values'] as List;
+              if (values.isEmpty) {
+                break;
+              }
+              int addedInPage = 0;
+              for (final row in values) {
+                if (row is List) {
+                  final map = <String, dynamic>{};
+                  for (var idx = 0; idx < keys.length && idx < row.length; idx++) {
+                    map[keys[idx]] = row[idx];
+                  }
+                  final key = (map['name'] ?? '').toString();
+                  if (key.isEmpty || !uniqueByName.containsKey(key)) {
+                    uniqueByName[key.isNotEmpty ? key : '__row_${uniqueByName.length}'] = map;
+                    addedInPage++;
+                  }
+                }
+              }
+              if (addedInPage > 0) {
+                fetchedAny = true;
+              }
+              if (addedInPage == 0 ||
+                  (values.length < pageSize &&
+                      values.length != 20 &&
+                      values.length != 50 &&
+                      values.length != 100 &&
+                      values.length != 200 &&
+                      values.length != 250)) {
+                break;
+              }
+              offset += values.length;
+              if (offset >= 25000) break;
+            } else {
+              break;
+            }
+          } catch (_) {
+            break;
+          }
+        }
+      }
+
+      // Desk Link Search fallback (uses Frappe Link Select permission if list endpoints return 403)
+      if (!fetchedAny) {
+        try {
+          await ensureCsrfToken();
+          final slPayload = jsonEncode({
+            'doctype': 'Institution',
+            'txt': '',
+            'page_length': 5000,
+          });
+          var slRes = await http
+              .post(
+                Uri.parse('$baseUrl/api/method/frappe.desk.search.search_link'),
+                headers: _headers,
+                body: slPayload,
+              )
+              .timeout(const Duration(seconds: 15));
+          if (slRes.statusCode == 400 && slRes.body.contains('CSRFTokenError')) {
+            _csrfToken = null;
+            await ensureCsrfToken();
+            slRes = await http
+                .post(
+                  Uri.parse('$baseUrl/api/method/frappe.desk.search.search_link'),
+                  headers: _headers,
+                  body: slPayload,
+                )
+                .timeout(const Duration(seconds: 15));
+          }
+          if (slRes.statusCode != 200) {
+            slRes = await http
+                .get(
+                  Uri.parse('$baseUrl/api/method/frappe.desk.search.search_link?doctype=Institution&txt=&page_length=5000'),
+                  headers: _headers,
+                )
+                .timeout(const Duration(seconds: 15));
+          }
+          lastStatusCode = slRes.statusCode;
+          if (slRes.statusCode == 200) {
+            final slBody = jsonDecode(slRes.body);
+            final rawResults = (slBody is Map)
+                ? (slBody['results'] ?? slBody['message'])
+                : null;
+            if (rawResults is List && rawResults.isNotEmpty) {
+              fetchedAny = true;
+              for (final item in rawResults) {
+                if (item is Map) {
+                  final id = (item['value'] ?? '').toString().trim();
+                  if (id.isEmpty) continue;
+                  final desc = (item['description'] ?? item['label'] ?? '').toString().trim();
+                  final parsedName = desc.isNotEmpty
+                      ? desc.split(',').first.trim()
+                      : id;
+                  uniqueByName[id] = {
+                    'name': id,
+                    'institution_name': parsedName.isNotEmpty ? parsedName : id,
+                  };
+                }
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (fetchedAny && uniqueByName.isNotEmpty) {
+        _institutionsLoadedFromServer = true;
         final List<Map<String, dynamic>> dataList = uniqueByName.values.toList();
 
         // Hydrate PIMS_META & Audit Trail from Frappe Comment doctype (ensures 100% sync with SFE Web Portal)
@@ -1400,19 +1809,28 @@ class ApiService extends ChangeNotifier {
       }
     } catch (e) {
       AppLogger.d('ApiService', 'Fetch institutions API error, loading local cached fallback: $e');
+      if (!_isOffline && _institutionsLoadedFromServer && _cachedInstitutions.isNotEmpty) {
+        return _cachedInstitutions;
+      }
+      _institutionsLoadedFromServer = false;
       final cache = await _readFromCache('institutions_cache.json');
       if (cache != null) {
         try {
           final List<dynamic> dataList = jsonDecode(cache);
           final list = dataList.map((json) => Institution.fromJson(json)).toList();
-          LocationResolver.registerInstitutions(list);
-          _cachedInstitutions = list;
-          NotificationService.checkAndNotifyPendingRejections(list, userEmail: loggedInEmail);
-          return list;
+          if (list.isNotEmpty) {
+            LocationResolver.registerInstitutions(list);
+            _cachedInstitutions = list;
+            NotificationService.checkAndNotifyPendingRejections(list, userEmail: loggedInEmail);
+            return list;
+          }
         } catch (_) {}
       }
+      if (!_isOffline && _cachedInstitutions.isNotEmpty) {
+        return _cachedInstitutions;
+      }
       try {
-        final String localData = await rootBundle.loadString('assets/institutions.json');
+        final String localData = (await rootBundle.loadString('assets/institutions.json')).replaceFirst('\uFEFF', '');
         final List<dynamic> dataList = jsonDecode(localData);
         final list = dataList.map((json) => Institution.fromJson(json)).toList();
         LocationResolver.registerInstitutions(list);
@@ -1535,7 +1953,7 @@ class ApiService extends ChangeNotifier {
     final email = (loggedInEmail ?? '').trim().toLowerCase();
     return _cachedInstitutions.where((i) {
       final o = (i.owner ?? '').trim().toLowerCase();
-      if (email.isNotEmpty && (o == email || o.contains(email) || email.contains(o))) {
+      if (email.isNotEmpty && o.isNotEmpty && (o == email || o.contains(email) || email.contains(o))) {
         return true;
       }
       // Any institution with an active review or rejection belongs in the user's tracking list
@@ -1546,6 +1964,117 @@ class ApiService extends ChangeNotifier {
       }
       return false;
     }).toList();
+  }
+
+  String _defaultFallbackInstitutionId() {
+    for (final inst in _cachedInstitutions) {
+      if (inst.isApprovedForProfiling && inst.name.isNotEmpty) {
+        return inst.name;
+      }
+    }
+    if (_cachedInstitutions.isNotEmpty && _cachedInstitutions.first.name.isNotEmpty) {
+      return _cachedInstitutions.first.name;
+    }
+    return 'INST-00001';
+  }
+
+  /// Queries live ERPNext by exact or fuzzy institution name so stale offline IDs (e.g. INST-00001)
+  /// always resolve to valid Staging/Production Institution Link docnames.
+  Future<String?> _lookupLiveInstitutionId(String query, {bool forceServer = false}) async {
+    final cleanQuery = query.trim();
+    if (cleanQuery.isEmpty || _isOffline) return null;
+
+    // 1. Check already loaded live institutions ONLY when verified loaded from server (never static 200 asset list)
+    if (!forceServer && _institutionsLoadedFromServer && _cachedInstitutions.length > 200) {
+      for (final inst in _cachedInstitutions) {
+        if (!inst.isRejected &&
+            (inst.institutionName.toLowerCase() == cleanQuery.toLowerCase() ||
+                inst.name.toLowerCase() == cleanQuery.toLowerCase())) {
+          return inst.name;
+        }
+      }
+    }
+
+    // 2. Direct RPC get_list query by institution_name
+    try {
+      final rpcUrl = Uri.parse(
+        '$baseUrl/api/method/frappe.client.get_list?doctype=Institution&fields=["name","institution_name"]&filters=${Uri.encodeComponent(jsonEncode([['institution_name', 'like', '%$cleanQuery%']]))}&limit_page_length=10',
+      );
+      final res = await http.get(rpcUrl, headers: _headers).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        final list = (body['message'] is List) ? body['message'] as List : (body['data'] is List ? body['data'] as List : const []);
+        for (final item in list) {
+          if (item is Map) {
+            final nm = (item['name'] ?? '').toString().trim();
+            final title = (item['institution_name'] ?? '').toString().trim();
+            if (nm.isNotEmpty && title.toLowerCase() == cleanQuery.toLowerCase()) {
+              return nm;
+            }
+          }
+        }
+        if (list.isNotEmpty && list.first is Map && (list.first['name'] ?? '').toString().trim().isNotEmpty) {
+          return (list.first['name'] ?? '').toString().trim();
+        }
+      }
+    } catch (_) {}
+
+    // 3. Link search fallback (works even on restricted Sales User permissions; GET + CSRF-safe POST)
+    try {
+      var slRes = await http
+          .get(
+            Uri.parse('$baseUrl/api/method/frappe.desk.search.search_link?doctype=Institution&txt=${Uri.encodeComponent(cleanQuery)}&page_length=10'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 10));
+      if (slRes.statusCode != 200) {
+        await ensureCsrfToken();
+        final slPayload = jsonEncode({
+          'doctype': 'Institution',
+          'txt': cleanQuery,
+          'page_length': 10,
+        });
+        slRes = await http
+            .post(
+              Uri.parse('$baseUrl/api/method/frappe.desk.search.search_link'),
+              headers: _headers,
+              body: slPayload,
+            )
+            .timeout(const Duration(seconds: 10));
+        if (slRes.statusCode == 400 && slRes.body.contains('CSRFTokenError')) {
+          _csrfToken = null;
+          await ensureCsrfToken();
+          slRes = await http
+              .post(
+                Uri.parse('$baseUrl/api/method/frappe.desk.search.search_link'),
+                headers: _headers,
+                body: slPayload,
+              )
+              .timeout(const Duration(seconds: 10));
+        }
+      }
+      if (slRes.statusCode == 200) {
+        final slBody = jsonDecode(slRes.body);
+        final rawResults = (slBody is Map) ? (slBody['results'] ?? slBody['message']) : null;
+        if (rawResults is List) {
+          for (final item in rawResults) {
+            if (item is Map) {
+              final id = (item['value'] ?? '').toString().trim();
+              final desc = (item['description'] ?? item['label'] ?? '').toString().toLowerCase();
+              if (id.isNotEmpty && desc.contains(cleanQuery.toLowerCase())) {
+                return id;
+              }
+            }
+          }
+          if (rawResults.isNotEmpty && rawResults.first is Map) {
+            final id = (rawResults.first['value'] ?? '').toString().trim();
+            if (id.isNotEmpty) return id;
+          }
+        }
+      }
+    } catch (_) {}
+
+    return null;
   }
 
   int get myPendingInstitutionCount => mySubmittedInstitutions.where((i) => i.isPendingApproval).length;
@@ -3109,7 +3638,7 @@ class ApiService extends ChangeNotifier {
           }).toList();
           _cachedSubmissions[i] = sub.copyWith(
             institution: (sub.institution == oldId || sub.institution == oldName)
-                ? replacementInstitution.institutionName
+                ? replacementInstitution.name
                 : sub.institution,
             workplaces: updatedWps,
             rejectionRemarks: remappedTag,
@@ -3817,9 +4346,10 @@ class ApiService extends ChangeNotifier {
         }
       }
       if (cleanWps.isEmpty) {
+        final fallbackInst = _defaultFallbackInstitutionId();
         cleanWps.add({
-          'hcp_workplace': 'INST-00001',
-          'workplace': 'INST-00001',
+          'hcp_workplace': fallbackInst,
+          'workplace': fallbackInst,
           'province_name': '1380600000',
           'city_municipality': '1380608000',
           'is_primary': 1,
@@ -3925,7 +4455,7 @@ class ApiService extends ChangeNotifier {
             {'hcp_specialty': cleanSpecs.first['hcp_specialty'] ?? 'SPEC-00001', 'is_primary': 1}
           ],
           'hcp_workplace': [
-            {'hcp_workplace': cleanWps.first['hcp_workplace'] ?? 'INST-00001', 'is_primary': 1}
+            {'hcp_workplace': cleanWps.first['hcp_workplace'] ?? _defaultFallbackInstitutionId(), 'is_primary': 1}
           ],
         };
 
@@ -4797,27 +5327,37 @@ class ApiService extends ChangeNotifier {
   }) async {
     final url = Uri.parse('$baseUrl/api/method/upload_file');
     try {
+      await ensureCsrfToken();
       // 1. Try standard Frappe multipart form-data upload
-      final request = http.MultipartRequest('POST', url);
-      _headers.forEach((key, val) {
-        if (key.toLowerCase() != 'content-type') {
-          request.headers[key] = val;
-        }
-      });
+      Future<http.Response> sendMultipart() async {
+        final request = http.MultipartRequest('POST', url);
+        _headers.forEach((key, val) {
+          if (key.toLowerCase() != 'content-type') {
+            request.headers[key] = val;
+          }
+        });
 
-      request.fields['is_private'] = isPrivate ? '1' : '0';
-      if (doctype != null && doctype.isNotEmpty) request.fields['doctype'] = doctype;
-      if (docname != null && docname.isNotEmpty) request.fields['docname'] = docname;
-      if (fieldname != null && fieldname.isNotEmpty) request.fields['attached_to_field'] = fieldname;
+        request.fields['is_private'] = isPrivate ? '1' : '0';
+        if (doctype != null && doctype.isNotEmpty) request.fields['doctype'] = doctype;
+        if (docname != null && docname.isNotEmpty) request.fields['docname'] = docname;
+        if (fieldname != null && fieldname.isNotEmpty) request.fields['attached_to_field'] = fieldname;
 
-      request.files.add(http.MultipartFile.fromBytes(
-        'file',
-        bytes,
-        filename: filename,
-      ));
+        request.files.add(http.MultipartFile.fromBytes(
+          'file',
+          bytes,
+          filename: filename,
+        ));
 
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+        final streamedResponse = await request.send();
+        return http.Response.fromStream(streamedResponse);
+      }
+
+      var response = await sendMultipart();
+      if (response.statusCode == 400 && response.body.contains('CSRFTokenError')) {
+        _csrfToken = null;
+        await ensureCsrfToken();
+        response = await sendMultipart();
+      }
 
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
@@ -5015,8 +5555,24 @@ class ApiService extends ChangeNotifier {
                 dynamicLocations: psgc,
               );
 
-              map['hcp_workplace'] = resolvedLoc.workplaceId;
-              map['workplace'] = resolvedLoc.workplaceId;
+              String resolvedWpId = resolvedLoc.workplaceId;
+              // If live institutions weren't loaded or candidate wasn't verified on server, look up live ID now
+              if (!_isOffline && (candidateMatch == null || insts.length <= 200)) {
+                final searchTerm = candidateMatch?.institutionName.isNotEmpty == true
+                    ? candidateMatch!.institutionName
+                    : (resolvedLoc.workplaceName.isNotEmpty && resolvedLoc.workplaceName != 'Workplace'
+                        ? resolvedLoc.workplaceName
+                        : LocationResolver.resolveInstitutionName(rawWp, insts));
+                if (searchTerm.isNotEmpty && !searchTerm.toUpperCase().startsWith('INST-')) {
+                  final liveId = await _lookupLiveInstitutionId(searchTerm);
+                  if (liveId != null && liveId.isNotEmpty) {
+                    resolvedWpId = liveId;
+                  }
+                }
+              }
+
+              map['hcp_workplace'] = resolvedWpId;
+              map['workplace'] = resolvedWpId;
               map['workplace_name'] = resolvedLoc.workplaceName;
               map['address'] = resolvedLoc.workplaceName;
               map['city_municipality'] = resolvedLoc.cityId;
@@ -5034,11 +5590,12 @@ class ApiService extends ChangeNotifier {
         }
         payload['table_workplaces'] = cleanWps;
 
-        // Guarantee parent payload region_name, province_name, city_municipality, institution are NEVER blank!
+        // Guarantee parent payload region_name, province_name, city_municipality, institution match resolved live IDs!
         if (cleanWps.isNotEmpty) {
           final prefMap = cleanWps.firstWhere((w) => w['preferred'] == 1, orElse: () => cleanWps.first);
-          if (payload['institution'] == null || payload['institution'].toString().trim().isEmpty) {
-            payload['institution'] = prefMap['hcp_workplace'] ?? prefMap['workplace_name'];
+          final resolvedParentInst = (prefMap['hcp_workplace'] ?? prefMap['workplace_name'] ?? '').toString().trim();
+          if (resolvedParentInst.isNotEmpty) {
+            payload['institution'] = resolvedParentInst;
           }
           if (payload['city_municipality'] == null || payload['city_municipality'].toString().trim().isEmpty) {
             payload['city_municipality'] = prefMap['city_municipality'];
@@ -5232,6 +5789,55 @@ class ApiService extends ChangeNotifier {
             createdData = resDoc;
             createdName = '${resDoc['name']}';
           }
+        } else if (((response.statusCode == 417 && response.body.contains('LinkValidationError') && response.body.contains('Workplace:')) ||
+                (rpcResp.statusCode == 417 && rpcResp.body.contains('LinkValidationError') && rpcResp.body.contains('Workplace:'))) &&
+            payload['table_workplaces'] is List) {
+          // Automatic live server Link ID re-resolution recovery if cached IDs (e.g. INST-00001) diverged from Staging
+          bool patchedAny = false;
+          final wps = List<dynamic>.from(payload['table_workplaces'] as List);
+          for (var idx = 0; idx < wps.length; idx++) {
+            if (wps[idx] is Map) {
+              final row = Map<String, dynamic>.from(wps[idx] as Map);
+              final wpId = (row['hcp_workplace'] ?? '').toString().trim();
+              final wpTitle = (row['workplace_name'] ?? row['address'] ?? '').toString().trim();
+              final humanQuery = wpTitle.isNotEmpty && !wpTitle.toUpperCase().startsWith('INST-')
+                  ? wpTitle
+                  : LocationResolver.resolveInstitutionName(wpId, _cachedInstitutions);
+              if (humanQuery.isNotEmpty) {
+                final liveId = await _lookupLiveInstitutionId(humanQuery, forceServer: true);
+                if (liveId != null && liveId.isNotEmpty && liveId != wpId) {
+                  row['hcp_workplace'] = liveId;
+                  row['workplace'] = liveId;
+                  wps[idx] = row;
+                  patchedAny = true;
+                }
+              }
+            }
+          }
+          if (patchedAny) {
+            payload['table_workplaces'] = wps;
+            final firstPref = wps.whereType<Map>().firstWhere(
+              (w) => w['preferred'] == 1,
+              orElse: () => wps.whereType<Map>().first,
+            );
+            if ((firstPref['hcp_workplace'] ?? '').toString().trim().isNotEmpty) {
+              payload['institution'] = firstPref['hcp_workplace'];
+            }
+            final retryRes = await http.post(
+              url,
+              headers: _headers,
+              body: jsonEncode(payload),
+            );
+            if (retryRes.statusCode == 200) {
+              final retryBody = jsonDecode(retryRes.body);
+              createdData = retryBody['data'];
+              createdName = createdData != null ? '${createdData['name']}' : null;
+            } else {
+              throw Exception('Failed to create submission: ${retryRes.statusCode} - ${retryRes.body}');
+            }
+          } else {
+            throw Exception('Failed to create submission: ${response.statusCode} - ${response.body}');
+          }
         } else {
           throw Exception('Failed to create submission: ${response.statusCode} - ${response.body}');
         }
@@ -5296,6 +5902,9 @@ class ApiService extends ChangeNotifier {
 
         // Direct state alignment via frappe.client.set_value to ensure ERPNext Desk is immediately 100% aligned
         // This guarantees IT Managers reviewing in ERPNext Desk see Processed + Applied for Existing HCP immediately
+        final submittedSig = (payload['consent_signature'] ?? '').toString().trim();
+        final serverSigMissing = liveDoc['consent_signature'] == null ||
+            liveDoc['consent_signature'].toString().trim().isEmpty;
         try {
           final setValUrl = Uri.parse('$baseUrl/api/method/frappe.client.set_value');
           await http.post(
@@ -5310,6 +5919,8 @@ class ApiService extends ChangeNotifier {
                 'application_status': targetAppStatus,
                 'profile_action': effectiveProfileAction,
                 'docstatus': targetDocstatus,
+                if (submittedSig.isNotEmpty && serverSigMissing)
+                  'consent_signature': submittedSig,
               },
             }),
           );
@@ -5337,6 +5948,10 @@ class ApiService extends ChangeNotifier {
             rawData['status'] = rawData['status'] ?? targetWfState;
             rawData['application_status'] = rawData['application_status'] ?? targetAppStatus;
             rawData['profile_action'] = rawData['profile_action'] ?? effectiveProfileAction;
+            if ((rawData['consent_signature'] == null || rawData['consent_signature'].toString().trim().isEmpty) &&
+                submittedSig.isNotEmpty) {
+              rawData['consent_signature'] = submittedSig;
+            }
             final freshSub = HcpProfileSubmission.fromJson(rawData);
             await _updateSubmissionInLocalCache(freshSub);
             return freshSub;
@@ -5534,8 +6149,24 @@ class ApiService extends ChangeNotifier {
                 dynamicLocations: psgc,
               );
 
-              map['hcp_workplace'] = resolvedLoc.workplaceId;
-              map['workplace'] = resolvedLoc.workplaceId;
+              String resolvedWpId = resolvedLoc.workplaceId;
+              // If live institutions weren't loaded or candidate wasn't verified on server, look up live ID now
+              if (!_isOffline && (candidateMatch == null || insts.length <= 200)) {
+                final searchTerm = candidateMatch?.institutionName.isNotEmpty == true
+                    ? candidateMatch!.institutionName
+                    : (resolvedLoc.workplaceName.isNotEmpty && resolvedLoc.workplaceName != 'Workplace'
+                        ? resolvedLoc.workplaceName
+                        : LocationResolver.resolveInstitutionName(rawWp, insts));
+                if (searchTerm.isNotEmpty && !searchTerm.toUpperCase().startsWith('INST-')) {
+                  final liveId = await _lookupLiveInstitutionId(searchTerm);
+                  if (liveId != null && liveId.isNotEmpty) {
+                    resolvedWpId = liveId;
+                  }
+                }
+              }
+
+              map['hcp_workplace'] = resolvedWpId;
+              map['workplace'] = resolvedWpId;
               map['workplace_name'] = resolvedLoc.workplaceName;
               map['address'] = resolvedLoc.workplaceName;
               map['city_municipality'] = resolvedLoc.cityId;
@@ -5553,11 +6184,12 @@ class ApiService extends ChangeNotifier {
         }
         payload['table_workplaces'] = cleanWps;
 
-        // Guarantee parent payload region_name, province_name, city_municipality, institution are NEVER blank!
+        // Guarantee parent payload region_name, province_name, city_municipality, institution match resolved live IDs!
         if (cleanWps.isNotEmpty) {
           final prefMap = cleanWps.firstWhere((w) => w['preferred'] == 1, orElse: () => cleanWps.first);
-          if (payload['institution'] == null || payload['institution'].toString().trim().isEmpty) {
-            payload['institution'] = prefMap['hcp_workplace'] ?? prefMap['workplace_name'];
+          final resolvedParentInst = (prefMap['hcp_workplace'] ?? prefMap['workplace_name'] ?? '').toString().trim();
+          if (resolvedParentInst.isNotEmpty) {
+            payload['institution'] = resolvedParentInst;
           }
           if (payload['city_municipality'] == null || payload['city_municipality'].toString().trim().isEmpty) {
             payload['city_municipality'] = prefMap['city_municipality'];
@@ -5677,12 +6309,23 @@ class ApiService extends ChangeNotifier {
       };
       payload.removeWhere((k, _) => !allowedDoctypeFields.contains(k));
 
+      await ensureCsrfToken();
+
       HcpProfileSubmission updatedResult;
-      final response = await http.put(
+      var response = await http.put(
         url,
         headers: _headers,
         body: jsonEncode(payload),
       );
+      if (response.statusCode == 400 && response.body.contains('CSRFTokenError')) {
+        _csrfToken = null;
+        await ensureCsrfToken();
+        response = await http.put(
+          url,
+          headers: _headers,
+          body: jsonEncode(payload),
+        );
+      }
 
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
@@ -5692,7 +6335,7 @@ class ApiService extends ChangeNotifier {
       } else {
         // Fallback: frappe.client.save
         final rpcUrl = Uri.parse('$baseUrl/api/method/frappe.client.save');
-        final rpcResp = await http.post(
+        var rpcResp = await http.post(
           rpcUrl,
           headers: _headers,
           body: jsonEncode({
@@ -5703,6 +6346,21 @@ class ApiService extends ChangeNotifier {
             }
           }),
         );
+        if (rpcResp.statusCode == 400 && rpcResp.body.contains('CSRFTokenError')) {
+          _csrfToken = null;
+          await ensureCsrfToken();
+          rpcResp = await http.post(
+            rpcUrl,
+            headers: _headers,
+            body: jsonEncode({
+              'doc': {
+                'doctype': 'HCP Profile Submission',
+                'name': submissionName,
+                ...payload,
+              }
+            }),
+          );
+        }
         if (rpcResp.statusCode == 200) {
           final body = jsonDecode(rpcResp.body);
           final docData = body['message'] ?? body['data'] ?? payload;
@@ -5710,11 +6368,12 @@ class ApiService extends ChangeNotifier {
           updatedResult = HcpProfileSubmission.fromJson(docData);
         } else {
           // Fallback: frappe.client.set_value for key scalar values
+          bool anySetValueOk = false;
           try {
             final setValUrl = Uri.parse('$baseUrl/api/method/frappe.client.set_value');
             for (var entry in payload.entries) {
               if (entry.key != 'doctype' && entry.key != 'name' && entry.value is! List) {
-                await http.post(
+                final svRes = await http.post(
                   setValUrl,
                   headers: _headers,
                   body: jsonEncode({
@@ -5724,9 +6383,15 @@ class ApiService extends ChangeNotifier {
                     'value': entry.value,
                   }),
                 );
+                if (svRes.statusCode == 200) {
+                  anySetValueOk = true;
+                }
               }
             }
           } catch (_) {}
+          if (!anySetValueOk) {
+            throw Exception('Failed to update submission $submissionName: HTTP ${response.statusCode}, RPC ${rpcResp.statusCode}');
+          }
           payload['name'] = submissionName;
           updatedResult = HcpProfileSubmission.fromJson(payload);
         }
@@ -5978,6 +6643,54 @@ class ApiService extends ChangeNotifier {
     };
   }
 
+  /// Checks whether [value] looks like a valid email address before sending to Frappe Email fields.
+  static bool isValidEmailAddress(String? value) {
+    final v = (value ?? '').trim();
+    if (v.isEmpty) return false;
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(v);
+  }
+
+  /// Extracts a concise readable error message from Frappe REST/RPC JSON error bodies.
+  String _extractFrappeErrorSummary(String body) {
+    final trimmed = body.trim();
+    if (trimmed.isEmpty) return '';
+    try {
+      final decoded = jsonDecode(trimmed);
+      if (decoded is Map) {
+        final serverMsgs = decoded['_server_messages'];
+        if (serverMsgs is String && serverMsgs.trim().isNotEmpty) {
+          try {
+            final msgList = jsonDecode(serverMsgs);
+            if (msgList is List && msgList.isNotEmpty) {
+              final first = msgList.first;
+              if (first is String) {
+                try {
+                  final inner = jsonDecode(first);
+                  if (inner is Map && inner['message'] != null) {
+                    final s = cleanCommentHtml(inner['message'].toString()).trim();
+                    return s.length > 220 ? '${s.substring(0, 220)}...' : s;
+                  }
+                } catch (_) {
+                  final s = cleanCommentHtml(first).trim();
+                  return s.length > 220 ? '${s.substring(0, 220)}...' : s;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+        for (final key in ['exception', 'message', 'exc_type']) {
+          final v = decoded[key];
+          if (v != null && v.toString().trim().isNotEmpty) {
+            final s = cleanCommentHtml(v.toString()).trim();
+            return s.length > 220 ? '${s.substring(0, 220)}...' : s;
+          }
+        }
+      }
+    } catch (_) {}
+    final cleaned = cleanCommentHtml(trimmed).trim();
+    return cleaned.length > 220 ? '${cleaned.substring(0, 220)}...' : cleaned;
+  }
+
   /// Sync HCP Account in ERPNext for the doctor under active program
   Future<void> syncHcpAccount({
     required String hcpId,
@@ -5995,6 +6708,7 @@ class ApiService extends ChangeNotifier {
       _inFlightHcpIds.add(hcpId);
     }
     try {
+      await ensureCsrfToken();
       final cleanProgram = LocationResolver.resolveProgramBranch(program);
       final validFrom = HcpAccount.calculateMonthValidFrom();
       final validTo = HcpAccount.calculateMonthValidTo();
@@ -6005,18 +6719,26 @@ class ApiService extends ChangeNotifier {
       );
       final searchResp = await http.get(searchUrl, headers: _headers);
       String? existingAccountName;
+      String? fallbackAccountName;
+      final List<dynamic> accountRecords = [];
       if (searchResp.statusCode == 200) {
         final searchBody = jsonDecode(searchResp.body);
-        final List<dynamic> data = searchBody['data'] ?? [];
-        for (var d in data) {
+        accountRecords.addAll(searchBody['data'] ?? []);
+        for (var d in accountRecords) {
           final aProg = (d['account_or_program'] ?? '').toString().trim();
           final vFrom = (d['valid_from'] ?? '').toString().trim();
           // Strictly match existing account in the current month so historical months are never overwritten
-          if (LocationResolver.isSameProgram(aProg, cleanProgram) && vFrom.startsWith(validFrom)) {
-            existingAccountName = d['name'];
-            break;
+          if (LocationResolver.isSameProgram(aProg, cleanProgram)) {
+            if (vFrom.startsWith(validFrom)) {
+              existingAccountName = d['name'];
+              break;
+            }
+            if (vFrom.isEmpty && fallbackAccountName == null) {
+              fallbackAccountName = d['name'];
+            }
           }
         }
+        existingAccountName ??= fallbackAccountName;
       }
 
       final effectiveSalesPerson = (salesPerson != null && salesPerson.trim().isNotEmpty)
@@ -6061,18 +6783,33 @@ class ApiService extends ChangeNotifier {
       if (effectiveWp != null) {
         final resolvedLoc = LocationResolver.resolveCompleteWorkplaceLocation(
           institutionIdOrName: effectiveWp.hcpWorkplace,
+          institutionName: effectiveWp.address,
           cityIdOrName: effectiveWp.cityMunicipality,
           provinceIdOrName: effectiveWp.provinceName,
+          institutions: _cachedInstitutions,
         );
+        String resolvedAccountWpId = resolvedLoc.workplaceId;
+        if (!_isOffline && (!_institutionsLoadedFromServer || _cachedInstitutions.length <= 200)) {
+          final wpQuery = resolvedLoc.workplaceName.isNotEmpty && resolvedLoc.workplaceName != 'Workplace'
+              ? resolvedLoc.workplaceName
+              : LocationResolver.resolveInstitutionName(effectiveWp.hcpWorkplace, _cachedInstitutions);
+          if (wpQuery.isNotEmpty && !wpQuery.toUpperCase().startsWith('INST-')) {
+            final liveId = await _lookupLiveInstitutionId(wpQuery, forceServer: true);
+            if (liveId != null && liveId.isNotEmpty) {
+              resolvedAccountWpId = liveId;
+            }
+          }
+        }
         cleanWps.add({
-          'hcp_workplace': resolvedLoc.workplaceId,
+          'hcp_workplace': resolvedAccountWpId,
           'city_municipality': resolvedLoc.cityId,
           'province_name': resolvedLoc.provinceId,
         });
       }
       if (cleanWps.isEmpty) {
+        final fallbackInst = _defaultFallbackInstitutionId();
         cleanWps.add({
-          'hcp_workplace': 'INST-00001',
+          'hcp_workplace': fallbackInst,
           'city_municipality': '1380608000',
           'province_name': '1380600000',
         });
@@ -6083,15 +6820,19 @@ class ApiService extends ChangeNotifier {
           ? prefContactsList.first
           : (contacts.isNotEmpty ? contacts.first : null);
 
-      // Clean contact child table - strictly 1 preferred row
+      // Clean contact child table - strictly 1 preferred row with valid email filtering
       final List<Map<String, dynamic>> cleanContacts = [];
       if (effectiveContact != null) {
-        final num = (effectiveContact.contactNumber ?? '').trim();
-        final em = (effectiveContact.emailAddress ?? '').trim();
-        if (num.isNotEmpty || em.isNotEmpty) {
+        final rawNum = (effectiveContact.contactNumber ?? '').trim();
+        final rawEm = (effectiveContact.emailAddress ?? '').trim();
+        final bool emIsEmail = isValidEmailAddress(rawEm);
+        final bool numIsEmail = isValidEmailAddress(rawNum);
+        final String resolvedNum = numIsEmail ? '' : rawNum;
+        final String resolvedEm = emIsEmail ? rawEm : (numIsEmail ? rawNum : '');
+        if (resolvedNum.isNotEmpty || resolvedEm.isNotEmpty) {
           cleanContacts.add({
-            if (num.isNotEmpty) 'contact_number': num,
-            if (em.isNotEmpty) 'email_address': em,
+            if (resolvedNum.isNotEmpty) 'contact_number': resolvedNum,
+            if (resolvedEm.isNotEmpty) 'email_address': resolvedEm,
           });
         }
       }
@@ -6106,8 +6847,8 @@ class ApiService extends ChangeNotifier {
 
       final Map<String, dynamic> payload = {
         'account_or_program': cleanProgram,
-        'territory': territory,
-        'sales_person': effectiveSalesPerson,
+        if (territory.trim().isNotEmpty) 'territory': territory.trim(),
+        if (effectiveSalesPerson.trim().isNotEmpty) 'sales_person': effectiveSalesPerson.trim(),
         'user_id': userId ?? loggedInEmail ?? 'jptan@profinsights.biz',
         'hcp': hcpId,
         'hcp_name': hcpFullName,
@@ -6124,31 +6865,126 @@ class ApiService extends ChangeNotifier {
         'contact_info': cleanContacts,
       };
 
+      Future<bool> updateExistingAccount(String accountName, Map<String, dynamic> bodyPayload) async {
+        final updateUrl = Uri.parse('$baseUrl/api/resource/HCP%20Account/${Uri.encodeComponent(accountName)}');
+        final resp = await http.put(updateUrl, headers: _headers, body: jsonEncode(bodyPayload));
+        if (resp.statusCode == 200) return true;
+        final rpcUrl = Uri.parse('$baseUrl/api/method/frappe.client.save');
+        final rpcResp = await http.post(
+          rpcUrl,
+          headers: _headers,
+          body: jsonEncode({
+            'doc': {
+              'doctype': 'HCP Account',
+              'name': accountName,
+              ...bodyPayload,
+            }
+          }),
+        );
+        if (rpcResp.statusCode == 200) return true;
+        final errSummary = _extractFrappeErrorSummary(rpcResp.body.isNotEmpty ? rpcResp.body : resp.body);
+        throw Exception('Failed to update HCP Account ($accountName): HTTP ${resp.statusCode}, RPC ${rpcResp.statusCode}${errSummary.isNotEmpty ? " ($errSummary)" : ""}');
+      }
+
       if (existingAccountName != null) {
-        // Direct update with clean single-row child tables (overwrites legacy duplicates and keeps strictly preferred)
-        final updateUrl = Uri.parse('$baseUrl/api/resource/HCP%20Account/${Uri.encodeComponent(existingAccountName)}');
-        final resp = await http.put(updateUrl, headers: _headers, body: jsonEncode(payload));
-        if (resp.statusCode != 200) {
-          final rpcUrl = Uri.parse('$baseUrl/api/method/frappe.client.save');
-          final rpcResp = await http.post(
-            rpcUrl,
-            headers: _headers,
-            body: jsonEncode({
-              'doc': {
-                'doctype': 'HCP Account',
-                'name': existingAccountName,
-                ...payload,
-              }
-            }),
-          );
-          if (rpcResp.statusCode != 200) {
-            throw Exception('Failed to update HCP Account ($existingAccountName): HTTP ${resp.statusCode}, RPC ${rpcResp.statusCode}');
-          }
-        }
+        await updateExistingAccount(existingAccountName, payload);
       } else {
         final createUrl = Uri.parse('$baseUrl/api/resource/HCP%20Account');
-        final resp = await http.post(createUrl, headers: _headers, body: jsonEncode(payload));
+        var resp = await http.post(createUrl, headers: _headers, body: jsonEncode(payload));
         if (resp.statusCode != 200) {
+          final firstErr = _extractFrappeErrorSummary(resp.body);
+          final lowerErr = firstErr.toLowerCase();
+          AppLogger.d('ApiService', '[HCP ACCOUNT] Initial POST ${resp.statusCode}: $firstErr');
+
+          // 1. Duplicate fallback -> locate existing HCP Account for doctor+program and PUT instead
+          if (lowerErr.contains('duplicate') || lowerErr.contains('already exists') || lowerErr.contains('unique')) {
+            String? dupName;
+            for (final d in accountRecords) {
+              final aProg = (d['account_or_program'] ?? '').toString().trim();
+              if (LocationResolver.isSameProgram(aProg, cleanProgram) && d['name'] != null) {
+                dupName = d['name'].toString();
+                break;
+              }
+            }
+            if (dupName == null) {
+              try {
+                final dupCheckResp = await http.get(searchUrl, headers: _headers);
+                if (dupCheckResp.statusCode == 200) {
+                  final list = (jsonDecode(dupCheckResp.body)['data'] ?? []) as List<dynamic>;
+                  for (final d in list) {
+                    final aProg = (d['account_or_program'] ?? '').toString().trim();
+                    if (LocationResolver.isSameProgram(aProg, cleanProgram) && d['name'] != null) {
+                      dupName = d['name'].toString();
+                      break;
+                    }
+                  }
+                }
+              } catch (_) {}
+            }
+            if (dupName != null && dupName.isNotEmpty) {
+              await updateExistingAccount(dupName, payload);
+              return;
+            }
+          }
+
+          // 2. LinkValidationError / Could not find optional link fallback
+          Map<String, dynamic> effectivePayload = Map<String, dynamic>.from(payload);
+          if (resp.statusCode == 417 && (lowerErr.contains('linkvalidationerror') || lowerErr.contains('could not find'))) {
+            final retryPayload = Map<String, dynamic>.from(payload);
+            bool stripped = false;
+            if (lowerErr.contains('workplace') || lowerErr.contains('institution')) {
+              final wpQuery = (effectiveWp?.address ?? '').trim().isNotEmpty
+                  ? effectiveWp!.address!.trim()
+                  : LocationResolver.resolveInstitutionName(primaryWpId?.toString(), _cachedInstitutions);
+              final liveWpId = wpQuery.isNotEmpty ? await _lookupLiveInstitutionId(wpQuery, forceServer: true) : null;
+              if (liveWpId != null && liveWpId.isNotEmpty) {
+                retryPayload['workplace_id'] = liveWpId;
+                if (retryPayload['workplace_info'] is List) {
+                  retryPayload['workplace_info'] = (retryPayload['workplace_info'] as List).map((item) {
+                    if (item is Map) {
+                      final m = Map<String, dynamic>.from(item);
+                      m['hcp_workplace'] = liveWpId;
+                      return m;
+                    }
+                    return item;
+                  }).toList();
+                }
+                stripped = true;
+              }
+            }
+            if (lowerErr.contains('sales person') || lowerErr.contains('sales_person')) {
+              retryPayload.remove('sales_person');
+              stripped = true;
+            }
+            if (lowerErr.contains('territory')) {
+              retryPayload.remove('territory');
+              stripped = true;
+            }
+            if (lowerErr.contains('sub_specialty') || lowerErr.contains('sub specialty')) {
+              retryPayload.remove('sub_specialty');
+              if (retryPayload['specialization'] is List) {
+                retryPayload['specialization'] = (retryPayload['specialization'] as List).map((item) {
+                  if (item is Map) {
+                    final m = Map<String, dynamic>.from(item);
+                    m.remove('sub_specialty');
+                    return m;
+                  }
+                  return item;
+                }).toList();
+              }
+              stripped = true;
+            } else if (lowerErr.contains('specialty')) {
+              retryPayload.remove('specialty');
+              retryPayload['specialization'] = [];
+              stripped = true;
+            }
+            if (stripped) {
+              effectivePayload = retryPayload;
+              resp = await http.post(createUrl, headers: _headers, body: jsonEncode(effectivePayload));
+              if (resp.statusCode == 200) return;
+            }
+          }
+
           final rpcUrl = Uri.parse('$baseUrl/api/method/frappe.client.insert');
           final rpcResp = await http.post(
             rpcUrl,
@@ -6156,12 +6992,14 @@ class ApiService extends ChangeNotifier {
             body: jsonEncode({
               'doc': {
                 'doctype': 'HCP Account',
-                ...payload,
+                ...effectivePayload,
               }
             }),
           );
           if (rpcResp.statusCode != 200) {
-            throw Exception('Failed to create HCP Account: HTTP ${resp.statusCode}, RPC ${rpcResp.statusCode}');
+            final rpcErr = _extractFrappeErrorSummary(rpcResp.body);
+            final detail = rpcErr.isNotEmpty ? rpcErr : firstErr;
+            throw Exception('Failed to create HCP Account: HTTP ${resp.statusCode}, RPC ${rpcResp.statusCode}${detail.isNotEmpty ? " ($detail)" : ""}');
           }
         }
       }
@@ -6398,6 +7236,7 @@ class ApiService extends ChangeNotifier {
 
       String effectiveHcpId = fullSub.hcpName.trim();
       final bool isNewDoctor = effectiveHcpId.isEmpty || effectiveHcpId == 'NEW-HCP';
+      final bool isOriginNewHcp = isNewDoctor || fullSub.isNewDoctorSubmission;
       if (!isNewDoctor && effectiveHcpId.isNotEmpty) {
         if (_inFlightHcpIds.contains(effectiveHcpId)) {
           throw Exception('Doctor $effectiveHcpId is currently locked by another concurrent process. Please wait.');
@@ -6740,6 +7579,12 @@ class ApiService extends ChangeNotifier {
       }
 
       liveDoc['hcp_name'] = effectiveHcpId;
+      final String preservedProfileAction = isOriginNewHcp
+          ? 'New HCP'
+          : ((fullSub.profileAction != null && fullSub.profileAction!.trim().isNotEmpty)
+              ? fullSub.profileAction!.trim()
+              : 'Existing HCP');
+      liveDoc['profile_action'] = preservedProfileAction;
 
       bool workflowApplied = false;
       final possibleActions = ['Approve', 'Approved', 'Approve Submission'];
@@ -6755,6 +7600,7 @@ class ApiService extends ChangeNotifier {
                 'doctype': 'HCP Profile Submission',
                 'name': subName,
                 'hcp_name': effectiveHcpId,
+                'profile_action': preservedProfileAction,
               },
               'action': actionName,
             }),
@@ -6779,6 +7625,7 @@ class ApiService extends ChangeNotifier {
               'name': subName,
               'fieldname': {
                 'hcp_name': effectiveHcpId,
+                'profile_action': preservedProfileAction,
                 'workflow_state': 'Approved',
                 'status': 'Approved',
                 'application_status': 'Applied',
@@ -6798,6 +7645,7 @@ class ApiService extends ChangeNotifier {
             headers: _headers,
             body: jsonEncode({
               'hcp_name': effectiveHcpId,
+              'profile_action': preservedProfileAction,
               'workflow_state': 'Approved',
               'status': 'Approved',
               'application_status': 'Applied',
@@ -6821,6 +7669,7 @@ class ApiService extends ChangeNotifier {
             list[idx]['application_status'] = 'Applied';
             list[idx]['docstatus'] = 1;
             list[idx]['hcp_name'] = effectiveHcpId;
+            list[idx]['profile_action'] = preservedProfileAction;
             await _writeToCache('submissions_cache.json', jsonEncode(list));
           }
         }

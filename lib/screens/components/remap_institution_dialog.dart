@@ -236,7 +236,10 @@ class _RemapInstitutionDialogState extends State<RemapInstitutionDialog> {
       if (mounted) {
         setState(() => _isSubmitting = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: const Color(0xFFDC2626)),
+          SnackBar(
+            content: Text(ApiService.formatUserFriendlyError(e, actionLabel: 'remap institution')),
+            backgroundColor: const Color(0xFFDC2626),
+          ),
         );
       }
     }

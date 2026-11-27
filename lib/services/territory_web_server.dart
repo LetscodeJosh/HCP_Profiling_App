@@ -194,6 +194,25 @@ class TerritoryWebServer {
             return;
           }
 
+          if (path == '/api/logout') {
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(jsonEncode({'success': true, 'message': 'Logged out successfully.'}));
+            await request.response.close();
+            return;
+          }
+
+          if (path.startsWith('/api/')) {
+            request.response.statusCode = HttpStatus.notImplemented;
+            request.response.headers.contentType = ContentType.json;
+            request.response.write(jsonEncode({
+              'success': false,
+              'authorized': false,
+              'message': 'Embedded preview server does not proxy $path. Use the Streamlit or Desktop Territory Portal server for live ERPNext authentication.',
+            }));
+            await request.response.close();
+            return;
+          }
+
           // Serve HTML Web Portal for all root and desk routes
           final htmlContent = await _loadPortalHtml();
           request.response.headers.contentType = ContentType('text', 'html', charset: 'utf-8');

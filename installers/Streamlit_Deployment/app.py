@@ -1274,7 +1274,13 @@ def fetch_live_institutions(opener):
                 # 5. Linked to a doctor
                 # 6. Created by a MedRep user (owner not System Admin / jptan)
                 # 7. Newly created institution sequence (greater than baseline INST-09341)
-                is_prop = (
+                explicitly_approved = (
+                    inst.get("is_proposal") == 0 or
+                    inst.get("is_medrep_submission") == 0 or
+                    bool(inst.get("approved_by")) or
+                    wf_st.lower() == "approved"
+                )
+                is_prop = (not explicitly_approved) and (
                     inst.get("is_proposal") == 1 or
                     inst.get("is_medrep_submission") == 1 or
                     wf_st.lower() in ("pending approval", "pending review", "proposal") or
@@ -1474,6 +1480,10 @@ def execute_institution_action(opener, action, payload):
             _post_institution_meta_comment(opener, name, human_msg, {
                 "workflow_state": target_state,
                 "docstatus": target_docstatus,
+                "is_proposal": 1 if needs_dsm else 0,
+                "is_medrep_submission": 1 if needs_dsm else 0,
+                "approved_by": "" if needs_dsm else actor_user,
+                "approved_at": "" if needs_dsm else now_iso,
                 "rejection_reason": "",
                 "action": "Routed to DSM" if needs_dsm else "Approved",
                 "user": actor_user,
@@ -1482,7 +1492,7 @@ def execute_institution_action(opener, action, payload):
                 "details": human_msg
             })
 
-            if target_state == "Approved":
+            if not needs_dsm:
                 _propagate_institution_to_linked_records(
                     opener,
                     [name, inst_title],
@@ -1555,6 +1565,7 @@ def execute_institution_action(opener, action, payload):
                 "region_name": reg_id,
                 "province_name": prov_id,
                 "city_municipality": city_id,
+                "barangay_name": barangay,
                 "street_address": street,
                 "address_line1": street,
                 "remarks": cert_note

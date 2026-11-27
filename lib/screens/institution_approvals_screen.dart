@@ -874,7 +874,7 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
                                     } catch (err) {
                                       setDlgState(() {
                                         isSaving = false;
-                                        validationErr = 'Failed to submit: $err';
+                                        validationErr = ApiService.formatUserFriendlyError(err, actionLabel: 'submit institution');
                                       });
                                     }
                                   },
@@ -1090,16 +1090,9 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
 
     // SFE Institution Approvals are centralized in the Territory Reconfiguration Web App (Desktop/Laptop)
 
-    // For MedRep / Sales User / Manager / SFE / Admin
+    // For MedRep / Sales User / Manager / SFE / Admin: show accurate total institution directory count
     final isManager = apiService.isManager || apiService.isAdmin || apiService.isSfe;
-    final submittedOrActionable = apiService.cachedInstitutions
-        .where((i) => i.isRejected || i.isPendingApproval || i.workflowState == 'Pending DSM Approval' || i.isCustom)
-        .toList();
-    final requests = isManager
-        ? apiService.cachedInstitutions
-        : (apiService.mySubmittedInstitutions.isNotEmpty
-            ? apiService.mySubmittedInstitutions
-            : (submittedOrActionable.isNotEmpty ? submittedOrActionable : apiService.cachedInstitutions));
+    final requests = apiService.cachedInstitutions;
     final pendingCount = requests.where((i) => i.isPendingApproval && i.workflowState != 'Pending DSM Approval').length;
     final dsmPendingCount = requests.where((i) => i.workflowState == 'Pending DSM Approval').length;
     final approvedCount = requests.where((i) => i.isApproved).length;
@@ -1578,17 +1571,20 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 0,
       color: Colors.white,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: inst.isRejected
-                ? const Color(0xFFEF4444)
-                : (inst.workflowState == 'Pending DSM Approval' ? const Color(0xFFC084FC) : const Color(0xFFE2E8F0)),
-            width: inst.isRejected ? 1.5 : (inst.workflowState == 'Pending DSM Approval' ? 1.2 : 1),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _showInstitutionInformationSheet(inst),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: inst.isRejected
+                  ? const Color(0xFFEF4444)
+                  : (inst.workflowState == 'Pending DSM Approval' ? const Color(0xFFC084FC) : const Color(0xFFE2E8F0)),
+              width: inst.isRejected ? 1.5 : (inst.workflowState == 'Pending DSM Approval' ? 1.2 : 1),
+            ),
           ),
-        ),
-        padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1894,16 +1890,39 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
                         ),
                       ),
                       const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF0B192C),
-                          side: const BorderSide(color: Color(0xFFCBD5E1)),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
-                        icon: const Icon(Icons.history_edu_rounded, size: 15, color: Color(0xFF0B192C)),
-                        label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF0066FF),
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                            onPressed: () async {
+                              final changed = await RemapInstitutionDialog.show(context, inst);
+                              if (changed == true) {
+                                _loadData();
+                              }
+                            },
+                            icon: const Icon(Icons.swap_horiz_rounded, size: 15),
+                            label: const Text('Change / Remap', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF0B192C),
+                              side: const BorderSide(color: Color(0xFFCBD5E1)),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                            onPressed: () => InstitutionAuditTrailDialog.show(context, inst),
+                            icon: const Icon(Icons.history_edu_rounded, size: 15, color: Color(0xFF0B192C)),
+                            label: const Text('Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -2010,8 +2029,413 @@ class _InstitutionApprovalsScreenState extends State<InstitutionApprovalsScreen>
               ],
             ],
           ],
+          ),
         ),
       ),
+    );
+  }
+
+  /// Displays complete read-only details for an Institution Submission, matching
+  /// the dark-navy full-sheet layout used in DOCTOR'S INFORMATION SHEET.
+  void _showInstitutionInformationSheet(Institution inst) {
+    final apiService = Provider.of<ApiService>(context, listen: false);
+    final resolvedName = LocationResolver.resolveInstitutionName(
+      inst.institutionName.isNotEmpty ? inst.institutionName : inst.name,
+    );
+    final rawReg = inst.regionName ?? inst.rawRegionName ?? '';
+    final rawProv = inst.provinceName ?? inst.rawProvinceName ?? '';
+    final rawCity = inst.cityMunicipality ?? inst.rawCityMunicipality ?? '';
+    final resolvedLoc = LocationResolver.resolveCompleteWorkplaceLocation(
+      institutionIdOrName: inst.name,
+      institutionName: resolvedName,
+      cityIdOrName: rawCity,
+      provinceIdOrName: rawProv,
+      regionIdOrName: rawReg,
+    );
+    final fullAddress = LocationResolver.formatLocation(
+      streetAddress: inst.streetAddress,
+      cityMunicipality: rawCity.isNotEmpty ? rawCity : resolvedLoc.cityName,
+      provinceName: rawProv.isNotEmpty ? rawProv : resolvedLoc.provinceName,
+      regionName: rawReg.isNotEmpty ? rawReg : resolvedLoc.regionName,
+    );
+
+    final String statusLabel = inst.status;
+    final Color statusColor = inst.isRejected
+        ? const Color(0xFFEF4444)
+        : (inst.workflowState == 'Pending DSM Approval'
+            ? const Color(0xFFA855F7)
+            : (inst.isApproved
+                ? const Color(0xFF10B981)
+                : (inst.isPendingApproval ? const Color(0xFFF59E0B) : const Color(0xFF38BDF8))));
+
+    // Collect affiliated doctors from cached masterlist & program accounts
+    final instIdLower = inst.name.trim().toLowerCase();
+    final instNameLower = inst.institutionName.trim().toLowerCase();
+    final affiliatedDoctors = <Map<String, String>>[];
+    final seenDocKeys = <String>{};
+
+    bool matchesInst(String? val) {
+      final v = (val ?? '').trim().toLowerCase();
+      if (v.isEmpty) return false;
+      return (instIdLower.isNotEmpty && v == instIdLower) ||
+          (instNameLower.isNotEmpty && v == instNameLower);
+    }
+
+    for (final doc in apiService.cachedDoctors) {
+      final linked = matchesInst(doc.institution) ||
+          doc.workplaces.any((w) => matchesInst(w.workplace) || matchesInst(w.address));
+      if (linked) {
+        final fullDocName = (doc.hcpFullName != null && doc.hcpFullName!.trim().isNotEmpty)
+            ? doc.hcpFullName!.trim()
+            : '${doc.firstName} ${doc.lastName}'.trim();
+        final docId = doc.name ?? '';
+        final dedupKey = docId.isNotEmpty ? docId : fullDocName.toLowerCase();
+        if (dedupKey.isNotEmpty && seenDocKeys.add(dedupKey)) {
+          affiliatedDoctors.add({
+            'name': fullDocName.isNotEmpty ? fullDocName : docId,
+            'id': docId,
+          });
+        }
+      }
+    }
+    for (final acc in apiService.cachedHcpAccounts) {
+      final linked = matchesInst(acc.workplaceId) ||
+          acc.workplaces.any((w) => matchesInst(w.hcpWorkplace) || matchesInst(w.workplace) || matchesInst(w.address));
+      if (linked) {
+        final docId = (acc.hcp ?? '').trim();
+        final fullDocName = (acc.hcpName ?? '').trim();
+        final dedupKey = docId.isNotEmpty ? docId : fullDocName.toLowerCase();
+        if (dedupKey.isNotEmpty && seenDocKeys.add(dedupKey)) {
+          affiliatedDoctors.add({
+            'name': fullDocName.isNotEmpty ? fullDocName : docId,
+            'id': docId,
+          });
+        }
+      }
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        height: MediaQuery.of(context).size.height * 0.90,
+        decoration: const BoxDecoration(
+          color: Color(0xFF0B192C),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          children: [
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(color: const Color(0xFF334155), borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'INSTITUTION INFORMATION SHEET',
+                            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white70),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: _buildInfoSheetField('Institution Name', resolvedName),
+                        ),
+                        const SizedBox(width: 12),
+                        Container(
+                          margin: const EdgeInsets.only(top: 18),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: statusColor.withOpacity(0.18),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: statusColor),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.verified_rounded, color: statusColor, size: 15),
+                              const SizedBox(width: 5),
+                              Text(
+                                statusLabel,
+                                style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: _buildInfoSheetField('Institution ID', inst.name.isNotEmpty ? inst.name : '-')),
+                        const SizedBox(width: 12),
+                        Expanded(child: _buildInfoSheetField('Workflow State', (inst.workflowState ?? '').isNotEmpty ? inst.workflowState! : statusLabel)),
+                      ],
+                    ),
+
+                    if (inst.isRejected) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF450A0A),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFEF4444)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(Icons.report_problem_rounded, color: Color(0xFFFCA5A5), size: 16),
+                                SizedBox(width: 6),
+                                Text('SFE REJECTION FEEDBACK', style: TextStyle(color: Color(0xFFFCA5A5), fontSize: 12, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(inst.rejectionDisplayLabel, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                            if ((inst.rejectionReason ?? '').trim().isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(inst.rejectionReason!.trim(), style: const TextStyle(color: Color(0xFFFEE2E2), fontSize: 12)),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 20),
+                    const Divider(color: Color(0xFF334155)),
+                    const SizedBox(height: 12),
+
+                    const Text('CLASSIFICATION', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: _buildInfoSheetField('Ownership', (inst.ownership ?? '').isNotEmpty ? inst.ownership! : '-')),
+                        const SizedBox(width: 12),
+                        Expanded(child: _buildInfoSheetField('Institution Type', (inst.institutionType ?? '').isNotEmpty ? inst.institutionType! : '-')),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: _buildInfoSheetField('Service Capability', (inst.serviceCapability ?? '').isNotEmpty ? inst.serviceCapability! : '-')),
+                        const SizedBox(width: 12),
+                        Expanded(child: _buildInfoSheetField('Record Source', inst.isCustom ? 'MedRep Submission' : 'Masterlist Record')),
+                      ],
+                    ),
+
+                    const SizedBox(height: 20),
+                    const Divider(color: Color(0xFF334155)),
+                    const SizedBox(height: 12),
+
+                    const Text('COMPLETE ADDRESS & LOCATION', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                    const SizedBox(height: 12),
+                    _buildInfoSheetField('Full Address', fullAddress.isNotEmpty ? fullAddress : '-'),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: _buildInfoSheetField('Region', rawReg.isNotEmpty ? rawReg : (resolvedLoc.regionName.isNotEmpty ? resolvedLoc.regionName : '-'))),
+                        const SizedBox(width: 12),
+                        Expanded(child: _buildInfoSheetField('Province', rawProv.isNotEmpty ? rawProv : (resolvedLoc.provinceName.isNotEmpty ? resolvedLoc.provinceName : '-'))),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: _buildInfoSheetField('City / Municipality', rawCity.isNotEmpty ? rawCity : (resolvedLoc.cityName.isNotEmpty ? resolvedLoc.cityName : '-'))),
+                        const SizedBox(width: 12),
+                        Expanded(child: _buildInfoSheetField('Barangay', (inst.barangayName ?? '').isNotEmpty ? inst.barangayName! : '-')),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _buildInfoSheetField('Street Address', (inst.streetAddress ?? '').isNotEmpty ? inst.streetAddress! : '-'),
+
+                    const SizedBox(height: 20),
+                    const Divider(color: Color(0xFF334155)),
+                    const SizedBox(height: 12),
+
+                    const Text('APPROVAL & GOVERNANCE DETAILS', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                    const SizedBox(height: 12),
+                    _buildInfoSheetField('Approval Status Note', inst.approvalStatusNote),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: _buildInfoSheetField('Submitted By / Owner', (inst.owner ?? '').isNotEmpty ? inst.owner! : '-')),
+                        const SizedBox(width: 12),
+                        Expanded(child: _buildInfoSheetField('Linked Doctor', (inst.linkedDoctorName ?? '').isNotEmpty ? inst.linkedDoctorName! : '-')),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: _buildInfoSheetField('Requires DSM Approval', inst.requiresDsmApproval ? 'Yes' : 'No')),
+                        const SizedBox(width: 12),
+                        Expanded(child: _buildInfoSheetField('Resubmission Count', '${inst.resubmissionCount} / 2')),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: _buildInfoSheetField('Accuracy Certification', inst.isCertified ? 'Certified Accurate' : 'Not Certified')),
+                        const SizedBox(width: 12),
+                        Expanded(child: _buildInfoSheetField('Certification Note', (inst.certificationNote ?? '').isNotEmpty ? inst.certificationNote! : '-')),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: _buildInfoSheetField('Created On', (inst.creation ?? '').isNotEmpty ? inst.creation! : '-')),
+                        const SizedBox(width: 12),
+                        Expanded(child: _buildInfoSheetField('Last Modified', (inst.modified ?? '').isNotEmpty ? inst.modified! : '-')),
+                      ],
+                    ),
+
+                    const SizedBox(height: 20),
+                    const Divider(color: Color(0xFF334155)),
+                    const SizedBox(height: 12),
+
+                    Text('AFFILIATED DOCTORS (${affiliatedDoctors.length})', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E293B),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF334155)),
+                      ),
+                      child: affiliatedDoctors.isEmpty
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: Text('No linked doctors cached for this institution.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                            )
+                          : Column(
+                              children: affiliatedDoctors.map((doc) {
+                                return Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  decoration: const BoxDecoration(
+                                    border: Border(bottom: BorderSide(color: Color(0xFF334155), width: 0.6)),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          doc['name'] ?? '-',
+                                          style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      if ((doc['id'] ?? '').isNotEmpty) ...[
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          doc['id']!,
+                                          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontFamily: 'monospace'),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+                ),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              decoration: const BoxDecoration(
+                color: Color(0xFF0F172A),
+                border: Border(top: BorderSide(color: Color(0xFF1E293B))),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Color(0xFF38BDF8)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      InstitutionAuditTrailDialog.show(context, inst);
+                    },
+                    icon: const Icon(Icons.history_edu_rounded, size: 16, color: Color(0xFF38BDF8)),
+                    label: const Text('View Audit Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0066FF),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                    ),
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Close', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoSheetField(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E293B),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF334155)),
+          ),
+          child: Text(
+            value,
+            style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w500),
+          ),
+        ),
+      ],
     );
   }
 

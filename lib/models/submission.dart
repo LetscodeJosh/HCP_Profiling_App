@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'lookup_models.dart';
 import '../services/data_sanitizer.dart';
 
@@ -196,9 +197,25 @@ class HcpProfileSubmission {
     // Resolve Profile Action (Existing HCP vs New HCP)
     final rawProfileAction = (json['profile_action'] ?? '').toString().trim();
     final String resolvedHcpId = (json['hcp_name'] ?? '').toString().trim();
+    final String rawChangesJson = (json['changes_json'] ?? '').toString();
+    final String rawChangeSummaryHtml = (json['change_summary_html'] ?? '').toString();
+    bool changesMarkedNewDoctor = rawChangesJson.contains('"is_new_doctor":true') ||
+        rawChangesJson.contains('"is_new_doctor": true') ||
+        rawChangeSummaryHtml.contains('New Doctor Information');
+    if (!changesMarkedNewDoctor && rawChangesJson.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawChangesJson);
+        if (decoded is Map) {
+          changesMarkedNewDoctor = decoded['is_new_doctor'] == true ||
+              (decoded['changes'] is Map && decoded['changes']['is_new_doctor'] == true);
+        }
+      } catch (_) {}
+    }
     final String resolvedAction = rawProfileAction.isNotEmpty
         ? rawProfileAction
-        : (resolvedHcpId.isNotEmpty ? 'Existing HCP' : 'New HCP');
+        : (changesMarkedNewDoctor
+            ? 'New HCP'
+            : (resolvedHcpId.isNotEmpty ? 'Existing HCP' : 'New HCP'));
 
     final bool isActuallyRejected = rawDocstatus == 2 || resolvedWorkflow == 'Rejected';
 
@@ -478,6 +495,39 @@ class HcpProfileSubmission {
       rejectedBy: rejectedBy ?? this.rejectedBy,
       rejectedInstitutionTag: rejectedInstitutionTag ?? this.rejectedInstitutionTag,
     );
+  }
+
+  /// Authoritative check for whether this submission originally registered a New Doctor.
+  /// Retains `true` even after managerial approval merges the doctor into the HCP masterlist
+  /// and assigns an `hcp_name` ID.
+  bool get isNewDoctorSubmission {
+    final normalizedAction = (profileAction ?? '').trim().toLowerCase();
+    if (normalizedAction == 'new hcp' || normalizedAction == 'new doctor') {
+      return true;
+    }
+    if (changesJson != null && changesJson!.trim().isNotEmpty) {
+      try {
+        final parsed = jsonDecode(changesJson!);
+        if (parsed is Map) {
+          if (parsed['is_new_doctor'] == true) return true;
+          if (parsed['changes'] is Map && parsed['changes']['is_new_doctor'] == true) {
+            return true;
+          }
+        }
+      } catch (_) {
+        if (changesJson!.contains('"is_new_doctor":true') ||
+            changesJson!.contains('"is_new_doctor": true')) {
+          return true;
+        }
+      }
+    }
+    if ((changeSummaryHtml ?? '').contains('New Doctor Information')) {
+      return true;
+    }
+    if (normalizedAction == 'existing hcp' || normalizedAction == 'existing doctor') {
+      return false;
+    }
+    return hcpName.trim().isEmpty || hcpName.trim() == 'NEW-HCP';
   }
 }
 

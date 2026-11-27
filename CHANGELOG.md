@@ -5,6 +5,21 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ---
 
+## [v.1.0.2-alpha] - 2026-11-27
+### Staging UAT Track (`versionName: 1.0.2`, `versionCode: 3`) — MedRep Live Institution Fix, SFE Dual-Role Dropdown, Review Tab & Human-Readable Errors
+- **MedRep Full Institution Count & `INST-00001` (`417 LinkValidationError`) Resolution**:
+  - Upgraded `ApiService.fetchInstitutions()` with 8 progressive REST/RPC GET tiers plus CSRF-authenticated `frappe.desk.reportview.get` and `frappe.desk.search.search_link` fallbacks, fixed `200 []` / 200-row page-cap stops, added automatic cross-environment cache purge (`_purgeAllEnvironmentCaches()`), and added live server `_lookupLiveInstitutionId(forceServer: true)` + `417` retry recovery in `createSubmission()`, `updateSubmission()`, and `syncHcpAccount()`.
+  - Fixed `InstitutionApprovalsScreen` to show accurate full live institution counts for MedRep accounts, kept `Change / Remap` accessible at 2/2 resubmissions, and stripped UTF-8 BOM from `assets/institutions.json`.
+- **Human-Readable Error Messaging (`ApiService.formatUserFriendlyError`)**:
+  - Replaced raw Frappe JSON/Python tracebacks across submission, approval, institution remap, and doctor forms with concise plain-English messages and a clean `(Exception Error: <code>)` reference.
+- **SFE Dual-Role Admin & Hamburger Menu + Review Tab**:
+  - Preserved dual `isAdmin` + `isSfe` access (`_hasSfeRole`) so SFE Admins retain full Admin access, display their assigned `employeeBranch`, and keep the `Switch Program` dropdown in `AppDrawer`.
+  - Relabeled the `Changes` tab and navigation notices to `Review` in `HcpWizardScreen` and `SubmissionHistoryScreen`, and fixed resubmission workflow transitions (`Existing HCP -> Submit for Processing`, `New HCP -> Submit for Approval`).
+- **Standalone Territory Reconfiguration Web App (`server.py` + Portal HTML 6-Copy Parity)**:
+  - Aligned `server.py` to Staging (`https://staging.pmii-marketing.com`), added automatic Frappe CSRF token handling, fixed `/` territory docnames & multi-column `order_by` in `secure_frappe_gateway.py`, wired direct standalone ERPNext writebacks (bulk add, record edit/rename, restore, doctor transfer, institution approval sync), and added Staging `localStorage` cache hygiene.
+
+---
+
 ## [v.1.0.1-alpha] - 2026-11-25
 ### Staging UAT Track (`1.0.1-alpha+2`) — Step 2/3 Submission Fixes, No Stock Photo Fallback & Clean UI
 - **Step 2 ERPNext Desk Visibility (`show_hcp_form: 1`) & `rejection_reason` Query Fix**:

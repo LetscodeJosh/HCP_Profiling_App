@@ -6,6 +6,7 @@ import '../models/lookup_models.dart';
 import '../services/api_service.dart';
 import 'components/app_drawer.dart';
 import 'components/paginated_footer_bar.dart';
+import 'components/user_initials_avatar.dart';
 import 'hcp_wizard_screen.dart';
 
 class _AccountSearchEntry {
@@ -1236,7 +1237,7 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
                                 child: const Row(
                                   children: [
                                     Expanded(child: Text('Contact Type', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-                                    Expanded(child: Text('Contact Value', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                                    Expanded(child: Text('Contact Number', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                                   ],
                                 ),
                               ),
@@ -1316,7 +1317,7 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
                             child: const Text('Close Details', style: TextStyle(fontWeight: FontWeight.bold)),
                           ),
                         ),
-                        if (apiService.isAdmin) ...[
+                        if (apiService.isAdmin || apiService.isSfe) ...[
                           const SizedBox(width: 12),
                           Expanded(
                             flex: 2,
@@ -2069,44 +2070,11 @@ class _DoctorAccountScreenState extends State<DoctorAccountScreen> {
           ),
         ),
         actions: [
-          // Role Badge
-          Container(
-            alignment: Alignment.center,
-            margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: apiService.isSfe
-                  ? const Color(0xFFA855F7).withValues(alpha: 0.25)
-                  : (apiService.isAdmin
-                      ? const Color(0xFFEF4444).withValues(alpha: 0.25)
-                      : (apiService.isManager
-                          ? const Color(0xFFF59E0B).withValues(alpha: 0.25)
-                          : const Color(0xFF0066FF).withValues(alpha: 0.25))),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: apiService.isSfe
-                    ? const Color(0xFFA855F7)
-                    : (apiService.isAdmin
-                        ? const Color(0xFFEF4444)
-                        : (apiService.isManager
-                            ? const Color(0xFFF59E0B)
-                            : const Color(0xFF38BDF8))),
-                width: 0.8,
-              ),
-            ),
-            child: Text(
-              apiService.userDesignationTitle,
-              style: TextStyle(
-                color: apiService.isSfe
-                    ? const Color(0xFFD8B4FE)
-                    : (apiService.isAdmin
-                        ? const Color(0xFFFCA5A5)
-                        : (apiService.isManager
-                            ? const Color(0xFFFCD34D)
-                            : const Color(0xFF93C5FD))),
-                fontSize: 10.5,
-                fontWeight: FontWeight.bold,
-              ),
+          // User Initials Avatar
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Center(
+              child: UserInitialsAvatar(apiService: apiService, size: 32),
             ),
           ),
           IconButton(

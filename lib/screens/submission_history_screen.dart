@@ -7,6 +7,7 @@ import '../models/hcp.dart';
 import '../models/hcp_account.dart';
 import '../services/api_service.dart';
 import 'components/app_drawer.dart';
+import 'components/user_initials_avatar.dart';
 import 'hcp_wizard_screen.dart';
 
 class SubmissionHistoryScreen extends StatefulWidget {
@@ -313,7 +314,10 @@ class _SubmissionHistoryScreenState extends State<SubmissionHistoryScreen> {
       if (mounted) {
         Navigator.pop(context); // Close loading dialog
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to apply $action: $e')),
+          SnackBar(
+            backgroundColor: const Color(0xFFDC2626),
+            content: Text(ApiService.formatUserFriendlyError(e, actionLabel: action.toLowerCase())),
+          ),
         );
       }
     }
@@ -597,7 +601,7 @@ class _SubmissionHistoryScreenState extends State<SubmissionHistoryScreen> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModalState) {
-          final tabTitles = ['Step 1', 'Step 2', 'Step 3', 'Others', 'Changes'];
+          final tabTitles = ['Step 1', 'Step 2', 'Step 3', 'Others', 'Review'];
 
           if (isFetchingFull && submission.name != null) {
             final apiService = Provider.of<ApiService>(context, listen: false);
@@ -761,10 +765,7 @@ class _SubmissionHistoryScreenState extends State<SubmissionHistoryScreen> {
                     // 3. Pending Approval -> Approve / Reject (Sales Manager, System Manager, SFE)
                     final bool canApproveOrReject = (apiService.isManager || apiService.isAdmin || apiService.isSfe) && isPending;
 
-                    // If user is Admin or SFE, allow override testing on Approved/Processed
-                    final bool showAdminOverrides = (apiService.isAdmin || apiService.isSfe) && isApproved;
-
-                    if (!canSubmitForProcessing && !canSubmitForApproval && !canApproveOrReject && !showAdminOverrides) {
+                    if (!canSubmitForProcessing && !canSubmitForApproval && !canApproveOrReject) {
                       return Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                         decoration: const BoxDecoration(
@@ -930,41 +931,6 @@ class _SubmissionHistoryScreenState extends State<SubmissionHistoryScreen> {
                               ],
                             ],
                           ),
-
-                          // Admin QA Action Bar (Allows testing transitions from any state)
-                          if (showAdminOverrides && isApproved) ...[
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                const Text(
-                                  'Admin Transition Test:',
-                                  style: TextStyle(color: Color(0xFFA1A1AA), fontSize: 11, fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(width: 8),
-                                TextButton(
-                                  onPressed: () => _handleApplyWorkflowAction(ctx, currentSub, 'Submit for Processing'),
-                                  child: const Text('Process', style: TextStyle(color: Color(0xFF60A5FA), fontSize: 11)),
-                                ),
-                                TextButton(
-                                  onPressed: () => _handleApplyWorkflowAction(ctx, currentSub, 'Submit for Approval'),
-                                  child: const Text('Submit', style: TextStyle(color: Color(0xFFFBBF24), fontSize: 11)),
-                                ),
-                                TextButton(
-                                  onPressed: () => _handleApplyWorkflowAction(ctx, currentSub, 'Approve'),
-                                  child: const Text('Approve', style: TextStyle(color: Color(0xFF4ADE80), fontSize: 11)),
-                                ),
-                                TextButton(
-                                  onPressed: () async {
-                                    final reason = await _showRejectionDialog(context, currentSub);
-                                    if (reason != null && reason.trim().isNotEmpty) {
-                                      _handleApplyWorkflowAction(ctx, currentSub, 'Reject', remarks: reason.trim());
-                                    }
-                                  },
-                                  child: const Text('Reject', style: TextStyle(color: Color(0xFFF87171), fontSize: 11)),
-                                ),
-                              ],
-                            ),
-                          ],
                         ],
                       ),
                     );
@@ -1351,90 +1317,123 @@ class _SubmissionHistoryScreenState extends State<SubmissionHistoryScreen> {
             Builder(
               builder: (ctx) {
                 final apiService = Provider.of<ApiService>(context, listen: false);
-                final photoUrl = submission.consentPhoto;
-                final sig = submission.consentSignature;
+                final photoUrl = submission.consentPhoto?.trim();
+                final sig = submission.consentSignature?.trim();
+                final hasSig = sig != null && sig.isNotEmpty;
+                final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
 
-                if (photoUrl != null && photoUrl.isNotEmpty) {
-                  final fullUrl = photoUrl.startsWith('http') ? photoUrl : '${apiService.baseUrl}$photoUrl';
+                Widget? buildSignatureWidget(String sigVal) {
+                  if (sigVal.startsWith('data:image/svg+xml')) {
+                    return CustomPaint(
+                      painter: _SvgSignaturePainter(sigVal),
+                      size: const Size(double.infinity, 140),
+                    );
+                  }
+                  if (sigVal.startsWith('data:image')) {
+                    final commaIdx = sigVal.indexOf(',');
+                    if (commaIdx != -1 && commaIdx + 1 < sigVal.length) {
+                      try {
+                        final cleaned = sigVal.substring(commaIdx + 1).replaceAll(RegExp(r'\s+'), '');
+                        final bytes = base64Decode(cleaned);
+                        if (bytes.isNotEmpty) {
+                          return Image.memory(
+                            bytes,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, __, ___) => const Center(
+                              child: Text('Unable to render signature image', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                            ),
+                          );
+                        }
+                      } catch (_) {}
+                    }
+                  }
+                  if (sigVal.startsWith('http') || sigVal.startsWith('/files/') || sigVal.startsWith('/private/files/')) {
+                    final fullUrl = sigVal.startsWith('http') ? sigVal : '${apiService.baseUrl}$sigVal';
+                    return Image.network(
+                      fullUrl,
+                      headers: apiService.authHeaders,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const Center(
+                        child: Text('Signature image unavailable offline', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                      ),
+                    );
+                  }
+                  return null;
+                }
+
+                final Widget? sigWidget = hasSig ? buildSignatureWidget(sig) : null;
+
+                if (!hasSig && !hasPhoto) {
                   return Container(
-                    height: 160,
+                    height: 90,
                     width: double.infinity,
                     decoration: BoxDecoration(
                       color: const Color(0xFF27272A),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: const Color(0xFF3F3F46)),
                     ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Image.network(
-                        fullUrl,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Center(
-                          child: Text('Group Consent Photo Attached', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                        ),
+                    child: const Center(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.info_outline_rounded, color: Color(0xFFA1A1AA), size: 18),
+                          SizedBox(width: 8),
+                          Text('No signature or consent photo recorded', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                        ],
                       ),
                     ),
                   );
-                } else if (sig != null && sig.isNotEmpty) {
-                  if (sig.startsWith('http') || sig.startsWith('/files/')) {
-                    final fullUrl = sig.startsWith('http') ? sig : '${apiService.baseUrl}$sig';
-                    return Container(
-                      height: 120,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFF3F3F46)),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          fullUrl,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => const Center(
-                            child: Text('Doctor Consent Signature Attached', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                }
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (hasSig) ...[
+                      const Text("Doctor's Consent Signature", style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 6),
+                      Container(
+                        height: 150,
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFCBD5E1)),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: sigWidget ?? const Center(
+                            child: Text('Doctor Consent Signature Recorded', style: TextStyle(color: Colors.black54, fontSize: 12)),
                           ),
                         ),
                       ),
-                    );
-                  } else if (sig.startsWith('data:image')) {
-                    try {
-                      final bytes = base64Decode(sig.split(',').last.trim());
-                      return Container(
-                        height: 120,
+                    ],
+                    if (hasSig && hasPhoto) const SizedBox(height: 12),
+                    if (hasPhoto) ...[
+                      const Text('Group Consent Photo', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 6),
+                      Container(
+                        height: 160,
                         width: double.infinity,
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: const Color(0xFF27272A),
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(color: const Color(0xFF3F3F46)),
                         ),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(10),
-                          child: Image.memory(bytes, fit: BoxFit.contain),
+                          child: Image.network(
+                            photoUrl.startsWith('http') ? photoUrl : '${apiService.baseUrl}$photoUrl',
+                            headers: apiService.authHeaders,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Center(
+                              child: Text('Group Consent Photo Attached', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                            ),
+                          ),
                         ),
-                      );
-                    } catch (_) {}
-                  }
-                }
-
-                return Container(
-                  height: 100,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF27272A),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF3F3F46)),
-                  ),
-                  child: Center(
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        Icon(Icons.draw_rounded, color: Color(0xFF38BDF8), size: 24),
-                        SizedBox(width: 8),
-                        Text('Doctor Consent Signature Attached', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                      ],
-                    ),
-                  ),
+                      ),
+                    ],
+                  ],
                 );
               },
             ),
@@ -1473,6 +1472,7 @@ class _SubmissionHistoryScreenState extends State<SubmissionHistoryScreen> {
                         child: fullDocPhotoUrl != null
                             ? Image.network(
                                 fullDocPhotoUrl,
+                                headers: apiService.authHeaders,
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) => const Icon(Icons.person_rounded, color: Color(0xFF38BDF8), size: 64),
                               )
@@ -1750,11 +1750,7 @@ class _SubmissionHistoryScreenState extends State<SubmissionHistoryScreen> {
         final wpRemoved = changesMap != null && changesMap['workplaces'] is Map && changesMap['workplaces']['removed'] is List ? (changesMap['workplaces']['removed'] as List) : [];
         final contactAdded = changesMap != null && changesMap['contact_information'] is Map && changesMap['contact_information']['added'] is List ? (changesMap['contact_information']['added'] as List) : [];
         final contactRemoved = changesMap != null && changesMap['contact_information'] is Map && changesMap['contact_information']['removed'] is List ? (changesMap['contact_information']['removed'] as List) : [];
-        final bool isNewDoc = submission.hcpName.isEmpty ||
-            submission.hcpName == 'NEW-HCP' ||
-            (changesMap != null && changesMap['is_new_doctor'] == true) ||
-            (submission.changesJson != null && submission.changesJson!.contains('"is_new_doctor":true')) ||
-            (submission.changesJson != null && submission.changesJson!.contains('"is_new_doctor": true'));
+        final bool isNewDoc = submission.isNewDoctorSubmission;
         final bool isExistingDoc = !isNewDoc;
         final bool hasRecordedChanges = basicInfoList.isNotEmpty ||
             specAdded.isNotEmpty ||
@@ -2801,43 +2797,10 @@ class _SubmissionHistoryScreenState extends State<SubmissionHistoryScreen> {
           ),
         ),
         actions: [
-          Container(
-            alignment: Alignment.center,
-            margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: apiService.isSfe
-                  ? const Color(0xFFA855F7).withOpacity(0.25)
-                  : (apiService.isAdmin
-                      ? const Color(0xFFEF4444).withOpacity(0.25)
-                      : (apiService.isManager
-                          ? const Color(0xFFF59E0B).withOpacity(0.25)
-                          : const Color(0xFF0066FF).withOpacity(0.25))),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: apiService.isSfe
-                    ? const Color(0xFFA855F7)
-                    : (apiService.isAdmin
-                        ? const Color(0xFFEF4444)
-                        : (apiService.isManager
-                            ? const Color(0xFFF59E0B)
-                            : const Color(0xFF38BDF8))),
-                width: 0.8,
-              ),
-            ),
-            child: Text(
-              apiService.userDesignationTitle,
-              style: TextStyle(
-                color: apiService.isSfe
-                    ? const Color(0xFFD8B4FE)
-                    : (apiService.isAdmin
-                        ? const Color(0xFFFCA5A5)
-                        : (apiService.isManager
-                            ? const Color(0xFFFCD34D)
-                            : const Color(0xFF93C5FD))),
-                fontSize: 10.5,
-                fontWeight: FontWeight.bold,
-              ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Center(
+              child: UserInitialsAvatar(apiService: apiService, size: 32),
             ),
           ),
           IconButton(
@@ -3348,4 +3311,99 @@ class _SubmissionHistoryScreenState extends State<SubmissionHistoryScreen> {
       ),
     );
   }
+}
+
+/// Renders legacy SVG `<path d="M ... L ...">` data URIs created by earlier app builds.
+class _SvgSignaturePainter extends CustomPainter {
+  final String svgSource;
+
+  _SvgSignaturePainter(this.svgSource);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    String rawSvg = svgSource;
+    if (svgSource.startsWith('data:image/svg+xml')) {
+      final commaIdx = svgSource.indexOf(',');
+      if (commaIdx != -1 && commaIdx + 1 < svgSource.length) {
+        final payload = svgSource.substring(commaIdx + 1).trim();
+        if (svgSource.contains(';base64')) {
+          try {
+            rawSvg = utf8.decode(base64Decode(payload.replaceAll(RegExp(r'\s+'), '')));
+          } catch (_) {
+            return;
+          }
+        } else {
+          rawSvg = Uri.decodeFull(payload);
+        }
+      }
+    }
+
+    final dMatch = RegExp(r'd="([^"]+)"').firstMatch(rawSvg);
+    if (dMatch == null) return;
+    final pathStr = dMatch.group(1) ?? '';
+
+    final strokes = <List<Offset>>[];
+    List<Offset> current = [];
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = -double.infinity, maxY = -double.infinity;
+
+    final tokenRegex = RegExp(r'([ML])\s*([-+]?\d*\.?\d+)\s+([-+]?\d*\.?\d+)');
+    for (final m in tokenRegex.allMatches(pathStr)) {
+      final cmd = m.group(1);
+      final x = double.tryParse(m.group(2) ?? '');
+      final y = double.tryParse(m.group(3) ?? '');
+      if (x == null || y == null || !x.isFinite || !y.isFinite) continue;
+      if (cmd == 'M') {
+        if (current.isNotEmpty) strokes.add(current);
+        current = [Offset(x, y)];
+      } else {
+        current.add(Offset(x, y));
+      }
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    if (current.isNotEmpty) strokes.add(current);
+    if (strokes.isEmpty) return;
+
+    const pad = 16.0;
+    final srcW = (maxX - minX) < 1 ? 1.0 : (maxX - minX);
+    final srcH = (maxY - minY) < 1 ? 1.0 : (maxY - minY);
+    final availW = (size.width - pad * 2).clamp(1.0, double.infinity);
+    final availH = (size.height - pad * 2).clamp(1.0, double.infinity);
+    final scaleX = availW / srcW;
+    final scaleY = availH / srcH;
+    final scale = (scaleX < scaleY ? scaleX : scaleY).clamp(0.1, 2.5);
+    final offsetX = (size.width - srcW * scale) / 2 - minX * scale;
+    final offsetY = (size.height - srcH * scale) / 2 - minY * scale;
+
+    final paint = Paint()
+      ..color = const Color(0xFF0F172A)
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = 3.0
+      ..style = PaintingStyle.stroke;
+
+    for (final stroke in strokes) {
+      if (stroke.length == 1) {
+        canvas.drawCircle(
+          Offset(stroke.first.dx * scale + offsetX, stroke.first.dy * scale + offsetY),
+          1.8,
+          paint..style = PaintingStyle.fill,
+        );
+        paint.style = PaintingStyle.stroke;
+      } else {
+        final path = Path()
+          ..moveTo(stroke.first.dx * scale + offsetX, stroke.first.dy * scale + offsetY);
+        for (int i = 1; i < stroke.length; i++) {
+          path.lineTo(stroke[i].dx * scale + offsetX, stroke[i].dy * scale + offsetY);
+        }
+        canvas.drawPath(path, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SvgSignaturePainter oldDelegate) => oldDelegate.svgSource != svgSource;
 }

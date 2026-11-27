@@ -141,5 +141,11 @@
 1. **Zero-Tampering of Active & Working Functions**:
    * When performing bug fixes or UI refinements, automated agents and developers must NEVER tamper with, alter, or remove active and accessible functions/code that may cause an app to become unreliable or crash during deeply thorough UAT sessions.
    * If something in the working codebase is currently active and functional, it must remain preserved and backward-compatible.
+2. **Long-Term Maintainability & Future-Developer Handoff Standard**:
+   * Keep the project repository clean, modular, self-documented, production-grade, and reliable so future developers who continue this project can safely understand, build, test, and operate every module without hidden surprises.
+3. **Strict Scoped-Change Mandate (Never Tamper With Untargeted Code)**:
+   * When implementing any bug fix or enhancement, **ONLY** modify what was explicitly requested. NEVER alter, refactor, or tamper with unrelated working flows, endpoints, schemas, or UI components that could destabilize the system, cause crashes, or render the app unusable during peak hours.
+4. **Peak-Hour Reliability Gate**:
+   * Every change must pass static analysis (`flutter analyze --no-fatal-infos` with 0 errors and 0 warnings), automated tests (`flutter test --no-pub`), and the technical-debt audit (`.github/scripts/audit_tech_debt.py` Grade A+) before deployment or release.
 
 

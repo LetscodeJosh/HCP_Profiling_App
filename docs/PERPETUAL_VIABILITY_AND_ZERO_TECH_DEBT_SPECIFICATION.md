@@ -134,3 +134,8 @@ The system maintains continuous regression testing covering every layer of the a
 ## 5. Architectural Commitment
 
 By enforcing this specification, the HCP Profiling and Territory Reconfiguration ecosystem is immune to degradation. Whether deployed continuously or left untouched across long operational cycles, the system guarantees **zero crashes, zero data loss, zero code rot, and continuous 24/7 mission success**.
+
+### Future-Developer Maintainability & Strict Zero-Untargeted-Tampering Mandate
+1. **Production-Grade Continuity**: Keep code, configuration, assets, and tests modular, clean, and well-documented so any future developer inheriting the repository can reliably build, verify, and operate it.
+2. **Surgical Scope Only**: Modify only what was explicitly requested for a fix or enhancement. Never tamper with, refactor, or break unrelated active workflows, endpoints, schemas, or UI components that are already working in production or during peak hours.
+3. **Mandatory Verification Before Release**: Every change must clear `flutter analyze --no-fatal-infos` (0 errors, 0 warnings), `flutter test --no-pub`, and `.github/scripts/audit_tech_debt.py` (`GRADE A+`).

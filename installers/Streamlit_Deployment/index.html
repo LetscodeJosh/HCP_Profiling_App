@@ -5779,6 +5779,37 @@ const BASELINE_ERP_TERRITORIES = [
     "Vivaro": []
   };
 
+  // Staging UAT Cache Isolation: Purge stale pre-staging JSON caches once on first Staging load
+  (function enforceStagingLocalStorageHygiene() {
+    try {
+      const ENV_TAG = 'staging-v1.0.1-clean';
+      if (localStorage.getItem('pims_portal_env_tag') !== ENV_TAG) {
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (!k) continue;
+          if (
+            k.startsWith('pims_accounts_') ||
+            k.startsWith('pims_global_doctor_assignments_') ||
+            k.startsWith('pims_stg_program_territories_') ||
+            k.startsWith('pims_stg_archived_territories_') ||
+            k === 'pims_user_accounts_v1' ||
+            k === 'pims_active_employees_v2' ||
+            k === 'pims_stg_sfe_inst_overrides_v1' ||
+            k === 'pims_stg_territory_tree_v1' ||
+            k === 'pims_stg_sales_persons_v1' ||
+            k === 'pims_stg_node_program_map_v1' ||
+            k === 'pims_stg_sp_program_map_v1'
+          ) {
+            keysToRemove.push(k);
+          }
+        }
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+        localStorage.setItem('pims_portal_env_tag', ENV_TAG);
+      }
+    } catch (_) {}
+  })();
+
   let archivedRecords = [];
 
   function loadArchivedRecordsForProgram() {
@@ -10048,7 +10079,7 @@ const BASELINE_ERP_TERRITORIES = [
       }
     } catch (_) {}
 
-    // Streamlit bidirectional dispatch for bulk creation on ERPNext
+    // Bidirectional ERPNext persistence for bulk creation (Streamlit or Standalone server.py)
     if (isStreamlitActive || (window.parent && window.parent !== window)) {
       try {
         window.parent.postMessage({
@@ -10061,6 +10092,35 @@ const BASELINE_ERP_TERRITORIES = [
           }
         }, "*");
       } catch (_) {}
+    } else {
+      (async () => {
+        let failCount = 0;
+        for (const item of bulkPayloads) {
+          try {
+            const res = await fetch('/api/resource/Territory', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                doctype: 'Territory',
+                territory_name: item.territory_name || item.name,
+                parent_territory: item.parent_territory || 'All Territories',
+                is_group: item.is_group ? 1 : 0,
+                territory_manager: item.territory_manager || '',
+                ...(item.custom_user_id ? { custom_user_id: item.custom_user_id } : {}),
+                custom_account_or_program: item.custom_account_or_program || activeProgram,
+                status: item.status || 'Active'
+              })
+            });
+            if (!res.ok) failCount++;
+          } catch (_) {
+            failCount++;
+          }
+        }
+        if (failCount > 0) {
+          showToast(`Warning: ${failCount} of ${bulkPayloads.length} territories could not be saved directly to ERPNext Staging.`, 'warning');
+        }
+      })();
     }
 
     const bulkTa = document.getElementById('bulkAddCodesTextarea');
@@ -16580,7 +16640,6 @@ const BASELINE_ERP_TERRITORIES = [
       row.operationalStatus = 'Active';
       row.isActive = true;
       row.isResigned = false;
-      row.userId = newUserId;
       row.status = 'CHANGED';
     } else {
       row.rep = 'Unassigned Rep';
@@ -16747,6 +16806,51 @@ const BASELINE_ERP_TERRITORIES = [
           }
         }, "*");
       } catch (_) {}
+    } else {
+      (async () => {
+        try {
+          let targetCode = row.activeCode;
+          if (newActiveCode !== oldCode) {
+            const renRes = await fetch('/api/method/frappe.model.rename_doc.update_document_title', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                doctype: 'Territory',
+                docname: oldCode,
+                name: newActiveCode,
+                enqueue: 0,
+                merge: 0,
+                freeze: 0
+              })
+            });
+            if (!renRes.ok) {
+              targetCode = oldCode;
+            }
+          }
+          const putBody = {
+            parent_territory: row.district || 'All Territories',
+            is_group: treeNode ? (treeNode.is_group || 0) : 0,
+            territory_manager: (row.operationalStatus === 'Active') ? newRep : '',
+            custom_account_or_program: activeProgram,
+            status: row.operationalStatus || 'Active'
+          };
+          if (newUserId && newUserId.includes('@')) {
+            putBody.custom_user_id = newUserId;
+          }
+          const putRes = await fetch(`/api/resource/Territory/${encodeURIComponent(targetCode)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(putBody)
+          });
+          if (!putRes.ok) {
+            showToast(`Warning: Local edit saved, but ERPNext Staging returned HTTP ${putRes.status} for ${targetCode}.`, 'warning');
+          }
+        } catch (err) {
+          console.warn('[Standalone Territory Save Warning]', err);
+        }
+      })();
     }
 
     closeEditModal();
@@ -17722,10 +17826,10 @@ const BASELINE_ERP_TERRITORIES = [
       localStorage.setItem('pims_stg_territory_tree_v1', JSON.stringify(territoryTreeData));
     } catch (_) {}
 
+    const restoredNode = territoryTreeData.find(t => t.name === restoredCode || t.territory_name === restoredCode);
+    const restoredPt = findProgramTerritoryByCode(restoredCode);
+    const restoredStatus = (restoredPt && restoredPt.operationalStatus) || 'Active';
     if (isStreamlitActive || (window.parent && window.parent !== window)) {
-      const node = territoryTreeData.find(t => t.name === restoredCode || t.territory_name === restoredCode);
-      const pt = findProgramTerritoryByCode(restoredCode);
-      const tgtStatus = (pt && pt.operationalStatus) || 'Active';
       try {
         window.parent.postMessage({
           isStreamlitMessage: true,
@@ -17733,13 +17837,24 @@ const BASELINE_ERP_TERRITORIES = [
           value: {
             action: "territory_toggle_status",
             territory: restoredCode,
-            status: tgtStatus,
-            custom_status: tgtStatus,
-            territory_manager: (node && node.territory_manager) || '',
+            status: restoredStatus,
+            custom_status: restoredStatus,
+            territory_manager: (restoredNode && restoredNode.territory_manager) || '',
             timestamp: Date.now()
           }
         }, "*");
       } catch (_) {}
+    } else if (restoredCode) {
+      fetch(`/api/resource/Territory/${encodeURIComponent(restoredCode)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          status: restoredStatus,
+          custom_status: restoredStatus,
+          territory_manager: (restoredNode && restoredNode.territory_manager) || ''
+        })
+      }).catch(e => console.warn('[Standalone Restore Sync Warning]', e));
     }
 
     renderTable();
@@ -17800,6 +17915,23 @@ const BASELINE_ERP_TERRITORIES = [
           }
         }, "*");
       } catch (_) {}
+    } else if (restoredItems.length > 0) {
+      (async () => {
+        for (const item of restoredItems) {
+          try {
+            await fetch(`/api/resource/Territory/${encodeURIComponent(item.name)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                status: item.status || 'Active',
+                custom_status: item.status || 'Active',
+                territory_manager: item.territory_manager || ''
+              })
+            });
+          } catch (_) {}
+        }
+      })();
     }
 
     renderTable();
@@ -18971,15 +19103,39 @@ const BASELINE_ERP_TERRITORIES = [
     closeDoctorTransferModal();
     showToast(`Successfully transferred and synced doctor reassignment! (${transferredToTargetCount} transferred to ${targetRep})`, 'success');
 
-    // In standalone mode (non-Streamlit), trigger background ERPNext refresh; in Streamlit mode, app.py already refreshes on doctor_transfer
+    // In standalone mode (non-Streamlit), persist reassigned HCP Accounts directly to ERPNext Staging
     if (!(isStreamlitActive || (window.parent && window.parent !== window))) {
-      try {
-        if (typeof syncTreeWithERPNext === 'function') {
-          syncTreeWithERPNext(false).catch(e => console.warn('Background ERPNext sync notification:', e));
+      (async () => {
+        const affectedCodes = new Set([sourceCode, targetCode].filter(Boolean));
+        const toSync = (programAccounts || []).filter(acc => acc && acc.accName && affectedCodes.has(acc.liveTerritory || acc.territory));
+        let failed = 0;
+        for (const acc of toSync) {
+          try {
+            const putRes = await fetch(`/api/resource/HCP%20Account/${encodeURIComponent(acc.accName)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                territory: acc.liveTerritory || acc.territory,
+                sales_person: acc.rep || ''
+              })
+            });
+            if (!putRes.ok) failed++;
+          } catch (_) {
+            failed++;
+          }
         }
-      } catch (err) {
-        console.warn('Sync dispatch:', err);
-      }
+        if (failed > 0) {
+          showToast(`Warning: ${failed} doctor account(s) could not be written to ERPNext Staging.`, 'warning');
+        }
+        try {
+          if (typeof syncTreeWithERPNext === 'function') {
+            await syncTreeWithERPNext(false);
+          }
+        } catch (err) {
+          console.warn('Sync dispatch:', err);
+        }
+      })();
     }
   }
 
@@ -19126,9 +19282,12 @@ const BASELINE_ERP_TERRITORIES = [
 
   function proceedToCustomHandoverWorkbench() {
     if (!activeResignTerritoryRow) return;
-    const terrCode = document.getElementById('resignTerritoryCodeInput').value;
-    const newRep = (document.getElementById('resignNewRepInput').value || '').trim();
-    const newUserId = (document.getElementById('resignNewUserIdInput').value || '').trim();
+    const terrEl = document.getElementById('resignTerritoryCodeInput');
+    const repEl = document.getElementById('resignNewRepSelect') || document.getElementById('resignNewRepInput');
+    const userEl = document.getElementById('resignNewUserIdInput');
+    const terrCode = terrEl ? terrEl.value : activeResignTerritoryRow.activeCode;
+    const newRep = ((repEl && repEl.value) || '').trim();
+    const newUserId = ((userEl && userEl.value) || '').trim();
 
     if (newRep) {
       activeResignTerritoryRow.designatedNewRep = newRep;
@@ -20897,7 +21056,13 @@ const BASELINE_ERP_TERRITORIES = [
     const lowWf = rawWf.toLowerCase();
     const ownerStr = String(r.owner || r.submitted_by || '').toLowerCase();
     const remStr = (String(r.remarks || '') + ' ' + String(r.custom_remarks || '') + ' ' + String(r.certification_note || '')).toLowerCase();
-    const isProposal = Boolean(
+    const explicitlyApproved = Boolean(
+      r.is_proposal === 0 || r.is_proposal === false ||
+      r.is_medrep_submission === 0 || r.is_medrep_submission === false ||
+      (r.approved_by && String(r.approved_by).trim().length > 0) ||
+      lowWf === 'approved'
+    );
+    const isProposal = !explicitlyApproved && Boolean(
       r.is_proposal === 1 || r.is_proposal === true ||
       r.is_medrep_submission === 1 || r.is_medrep_submission === true ||
       lowWf === 'pending approval' || lowWf === 'pending review' || lowWf === 'proposal' ||
@@ -21517,6 +21682,9 @@ const BASELINE_ERP_TERRITORIES = [
     const metaPayload = Object.assign({
       workflow_state: inst.workflow_state,
       docstatus: inst.docstatus,
+      is_proposal: inst.is_proposal ? 1 : 0,
+      is_medrep_submission: inst.is_medrep_submission ? 1 : 0,
+      approved_by: inst.approved_by || '',
       is_certified: inst.is_certified ? 1 : 0,
       certification_note: inst.certification_note || '',
       ownership: inst.ownership,
@@ -21546,19 +21714,23 @@ const BASELINE_ERP_TERRITORIES = [
       docstatus: inst.docstatus
     };
     try {
-      await fetch(`/api/resource/Institution/${encodeURIComponent(inst.name)}`, {
+      const putRes = await fetch(`/api/resource/Institution/${encodeURIComponent(inst.name)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(putBody)
       });
+      if (!putRes.ok) {
+        console.warn('[Local Desktop Institution PUT Non-OK]', putRes.status);
+        showToast(`Warning: ERPNext Staging returned HTTP ${putRes.status} saving Institution ${inst.name}.`, 'warning');
+      }
     } catch (e) {
       console.warn('[Local Desktop Institution PUT Warning]', e);
     }
 
     try {
       const commentHtml = `<p><strong>[SFE Governance — ${escapeSfeHtml(actionLabel)}]</strong> Facility: <b>${escapeSfeHtml(inst.institution_name)}</b> | State: <b>${escapeSfeHtml(inst.workflow_state)}</b> | Actor: ${escapeSfeHtml(actor)}</p><!--PIMS_META:${JSON.stringify(metaPayload)}-->`;
-      await fetch('/api/resource/Comment', {
+      const comRes = await fetch('/api/resource/Comment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -21570,34 +21742,39 @@ const BASELINE_ERP_TERRITORIES = [
           content: commentHtml
         })
       });
+      if (!comRes.ok) {
+        console.warn('[Local Desktop Comment POST Non-OK]', comRes.status);
+      }
     } catch (e) {
       console.warn('[Local Desktop Comment POST Warning]', e);
     }
 
-    const approvalNote = inst.workflow_state === 'Approved'
+    const isApprovedMaster = inst.workflow_state === 'Approved' || (inst.workflow_state === 'Draft' && !inst.is_proposal);
+    const approvalNote = isApprovedMaster
       ? 'this institution is now approved'
       : (inst.workflow_state === 'Rejected'
           ? `[REJECTED INSTITUTION: ${inst.rejection_reason}]`
           : `Pending (${inst.workflow_state})`);
     const targetId = inst.remapped_to_id || inst.name;
-    const targetName = inst.remapped_to_name || inst.institution_name;
 
-    for (const dt of ['HCP Account', 'HCP']) {
+    const propagationSpecs = [
+      { dt: 'HCP Account', linkField: 'workplace_id' },
+      { dt: 'HCP', linkField: 'institution' }
+    ];
+    for (const spec of propagationSpecs) {
       try {
-        const flt = encodeURIComponent(JSON.stringify([[dt, 'workplace_name', '=', inst.name]]));
-        const r = await fetch(`/api/resource/${encodeURIComponent(dt)}?filters=${flt}&fields=%5B%22name%22%5D&limit_page_length=200`, { credentials: 'include' });
+        const flt = encodeURIComponent(JSON.stringify([[spec.dt, spec.linkField, '=', inst.name]]));
+        const r = await fetch(`/api/resource/${encodeURIComponent(spec.dt)}?filters=${flt}&fields=%5B%22name%22%5D&limit_page_length=200`, { credentials: 'include' });
         if (r.ok) {
           const j = await r.json();
           for (const row of (j.data || [])) {
-            await fetch(`/api/resource/${encodeURIComponent(dt)}/${encodeURIComponent(row.name)}`, {
+            const updateObj = { workplace_approval_note: approvalNote };
+            updateObj[spec.linkField] = targetId;
+            await fetch(`/api/resource/${encodeURIComponent(spec.dt)}/${encodeURIComponent(row.name)}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               credentials: 'include',
-              body: JSON.stringify({
-                workplace_name: targetId,
-                hospital_affiliation: targetName,
-                workplace_approval_note: approvalNote
-              })
+              body: JSON.stringify(updateObj)
             });
           }
         }

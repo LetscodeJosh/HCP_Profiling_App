@@ -1,0 +1,25 @@
+{
+  "version": "v.1.0.2-alpha",
+  "version_name": "1.0.2",
+  "build_number": 3,
+  "version_code": 3,
+  "release_date": "2026-11-27",
+  "application_id": "com.pims.hcpnexus",
+  "namespace": "com.pims.hcpnexus",
+  "min_sdk": 24,
+  "target_sdk": 36,
+  "compile_sdk": 36,
+  "full_version": "v.1.0.2-alpha",
+  "aab_file": "pims-hcpnexus-rel-1.0.2-alpha.aab",
+  "apk_file": "HCP_Profiling_V.1.0.2-alpha.apk",
+  "web_installer_exe": "Territory_Reconfiguration_Setup.exe",
+  "web_installer_zip": "Territory_Reconfiguration_Setup.zip",
+  "highlights": [
+    "Staging UAT v.1.0.2-alpha (versionName 1.0.2, versionCode/buildNumber 3 for Play Store Console & TestFlight)",
+    "Fixed MedRep 200-institution count truncation and INST-00001 417 LinkValidationError via multi-tier live ERPNext lookup, CSRF retry, and cross-environment cache purge",
+    "Added human-readable error messaging with clean (Exception Error: <code>) suffix across submission, approval, remap, and doctor screens",
+    "Preserved dual SFE+Admin role privileges with assigned employeeBranch and Switch Program dropdown in hamburger menu",
+    "Relabeled Changes tab to Review across HCP Profile Submission wizard and detail view; fixed resubmission workflow transitions",
+    "Hardened standalone Territory Reconfiguration Web App (server.py + 6-copy portal HTML parity) for Staging ERPNext without Streamlit dependency"
+  ]
+}
